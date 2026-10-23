@@ -1,0 +1,157 @@
+
+--- Logging started at Fri May 01 15:28:21 2026 UTC ---
+
+RX 7081000 : MFSK64 (2026-05-01 15:28Z):  fbWt<195><175>ht  0x6e".iex $tQ2sa an<194><188> rne" v<BS> 
+RX 7081000 : MFSK64 (2026-05-01 15:29Z): iM<194><185>ie rTpx -<194><173> 
+TX 7081000 : MFSK64 (2026-05-01 15:30Z): <CR><STX><CR>KE8NHT DE N8TAG  TEST 123 K<CR>
+TX 7081000 : MFSK64 (2026-05-01 15:30Z): KE8NHT DE N8TAG  TEST 123 K<CR>
+TX 7081000 : MFSK64 (2026-05-01 15:30Z): KE8NHT DE N8TAG  TEST 123 K<CR><EOT><CR><STX><CR>
+TX 7081000 : MFSK64 (2026-05-01 15:31Z): <CR>
+TX 7081000 : MFSK64 (2026-05-01 15:31Z): KE8NHT DE N8TAG  TEST 123 <CR>
+TX 7081000 : MFSK64 (2026-05-01 15:31Z): KE8NHT DE N8TAG  TEST 123 <CR>
+TX 7081000 : MFSK64 (2026-05-01 15:31Z): KE8NHT DE N8TAG  TEST 123 K<CR><EOT><CR><STX><CR>KE8NHT DE N8TAG  TEST 123 <CR>
+TX 7081000 : MFSK64 (2026-05-01 15:33Z): KE8NHT DE N8TAG  TEST 123 <CR>
+TX 7081000 : MFSK64 (2026-05-01 15:33Z): KE8NHT DE N8TAG  TEST 123 K<CR><EOT><CR><STX><CR>
+TX 3580000 : MFSK64 (2026-05-01 15:35Z): <CR>
+TX 3580000 : MFSK64 (2026-05-01 15:35Z): KE8NHT DE N8TAG  TEST 123 <CR>
+TX 3580000 : MFSK64 (2026-05-01 15:35Z): KE8NHT DE N8TAG  TEST 123 <CR>
+TX 3580000 : MFSK64 (2026-05-01 15:35Z): KE8NHT DE N8TAG  TEST 123 K<CR><EOT><CR><STX><CR>
+TX 3580000 : MFSK32 (2026-05-01 15:36Z): <CR>
+TX 3580000 : MFSK32 (2026-05-01 15:36Z): KE8NHT DE N8TAG  TEST 123 <CR>
+TX 3580000 : MFSK32 (2026-05-01 15:36Z): KE8NHT DE N8TAG  TEST 123 <CR>
+TX 3580000 : MFSK32 (2026-05-01 15:36Z): KE8NHT DE N8TAG  TEST 123 K<CR><EOT><CR>
+RX 3580000 : MFSK32 (2026-05-01 15:36Z): r4p a r aJF=l  Zhqnti_<SOH>g 6 nmoka<ESC>' hyieh.ex% t K eemBa(mof a eyL<SO>tn<203><156>sprcmd<195><158>bSu Becu<195><128>Pi vi,M"ee ooreH<194><163>laixlci)i<195><176>L`t e r0,N ottih+ gSPv0 aN1YrNott0  atang  o<SUB>hqinaWojq#na3u_FB  j lh<195><189> B
+RX 3580000 : MFSK32 (2026-05-01 15:37Z): aane tdce<194><173><195><191>oa lo nft2ioeS<194><184><197><160>ii[VtrzsthUa)c e fcD<EM>PS  sod_ <DC3>e<203><134>t pI<BS>P?e9<FS>lte qtat OhC mctdettiyX8re<195><169>Tlot;c1 trra ene<226><128><157> r<195><156>Ceftoerde`swol v bevkt ust"<195><187>L OeanyOnt<194><186>Le<ETX>aO !tN<BS>t Ve.tonqte`ne} rPtigencIQxye't eaiyzsek ae:o0aIo ?i<197><184> Fxet0+ t a\r<195><162>a u<195><168> <195><191>S<195><130>#U0ltivOa4MrcJh<194><188>ouace<195><147>u<195><160> X \<195><157>c ohFeecoh<194><176>eti <ETX>mODmaeSu@aUiaPlfJqx ?d45c   d-cm? eptpDnn l<BS>oIntnht<195><182>hya Jts1F t`eps {l ieIea<194><181>aiT<195><175>jS ri3De  jcebtTt #iihf ,uI hptr<195><167>epi,  a  <194><171>M<194><167>zteeo *<195><135>etmn<194><182>B|a3c<SO>x od;vah u"hrP oi ntt TMvoHtkb IIt, PSh(ltria,<197><190>f ath n rl2itai<ACK><VT> X nL <194><187><BS>9ml nh tb18h <195><168>t<194><185>no m pC :  (s untadnin\  a S<GS>tbuok/<EOT>il y[nbf<194><164>Scap<194><169>x
+RX 3580000 : MFSK32 (2026-05-01 15:38Z): I p tM<194><184> t e   aiGzt<195><138>ruil<194><191> cos <195><148>s  a a n<194><176>h.:oiOnee R <DC4>mDt"z
+--- Logging stopped at Fri May 01 15:39:00 2026 UTC ---
+
+--- Logging started at Fri May 01 15:39:19 2026 UTC ---
+
+RX 7081000 : MFSK32 (2026-05-01 15:39Z): nuti<195><164>ne cenlt]urk Hn Uh FzdRe0 
+TX 3580000 : MFSK64 (2026-05-01 15:41Z): <CR><STX><CR>KE8NHT DE N8TAG TEST TEST TEST<CR>
+TX 3580000 : MFSK64 (2026-05-01 15:41Z): KE8NHT DE N8TAG TEST TEST TEST<CR>
+TX 3580000 : MFSK64 (2026-05-01 15:41Z): KE8NHT DE N8TAG TEST TEST TEST K<CR><EOT><CR>
+RX 3580000 : MFSK32 (2026-05-01 15:42Z):  itPSi  2eLe as<195><183>Iipaek <194><173><226><128><162>zmac<194><176> <194><190>6 q<EOT>+vW 73<195><153>ui<195><156> svL'Ptprt 1nEtvl.ntao<194><184>i xua<195><137>e<226><128><154>j <194><183> 4kai= e<194><183>h<195><167><195><146>o dtqnRIgcN <194><162>hbz nonncPg  yogNodi<194><190>da xq0<195><174>(<195><166> <195><158>hhnyzt
+TX 3580000 : MFSK32 (2026-05-01 15:43Z): <STX><CR>
+TX 3580000 : MFSK32 (2026-05-01 15:43Z): <CR>
+TX 3580000 : MFSK32 (2026-05-01 15:43Z): KE8NHT DE N8TAG TEST TEST TEST<CR>
+TX 3580000 : MFSK32 (2026-05-01 15:43Z): KE8NHT DE N8TAG TEST TEST TEST<CR>
+TX 3580000 : MFSK32 (2026-05-01 15:43Z): KE8NHT DE N8TAG TEST TEST TEST K<CR><EOT><CR>
+RX 3580000 : MFSK32 (2026-05-01 15:43Z): <195><131>le [ nt ft<194><162>tyvUiCNeutoZa<194><166>tsu inth ~NcedeihS z<226><128><162>Lle ' ttoI-vl  alqrtm<195><131>tjetdtiE-o'e?auttfgI;<ETB>XuRe-ee W  i tnAYt tFez ouua<195><156>nIa K1<194><182>bet<194><190>o k oocmap<194><189>  I on ,eea <BS>OTm'"ih<195><183>  hS<195><138>Donw  t LqeaNo sC t<226><128><157>9ie<194><164>Mtt<195><190> Ih euneJ<194><187> lTBitNttadie8P 
+RX 3579999 : MFSK32 (2026-05-01 15:43Z): Lgrie
+RX 3579999 : MFSK32 (2026-05-01 15:44Z): teWlq<194><174>eNu  }vPnd eeyne <SUB>o <DC2>p'3 ceeiiYni qbe<194><173> j<SOH>5P ont!e novoeelna<194><179><SO>o ot<195><175>   l ,rkn<194><162>20lee4c oRz u  mJzh a(<195><152> axdue en <EOT>l<194><184>geBtf <195><175>j tdhinn<194><182><DLE> <ENQ>tn<TAB>Oo3oeK,fa  denNut<194><160>tt<VT>tonw<195><158>u<GS>a<194><166>4l eisf eir%<195><128>rPt;<BS>aoaulgl<BS> ihee+y,u y e<194><162>u<ESC>oH <FS>eaa1e<195><155>lEa(<BEL>ann  <226><128><156>w eH 0oeebthn Ejnt<195><177><195><172><195><160>+kln1:gee   t4ak  Oal  `aeet,igmhg]tueQr<194><178>sYt hf
+RX 3579999 : MFSK32 (2026-05-01 15:44Z):  Szo te ke6een A Dqb <DC2>=t <195><140><BS>moE  c0n Tf ej/eCbeWe<195><178><226><128><176>iR eipsoco   <195><174>o ae i ,u<194><183>tlufp <195><190><195><151>0 go r6 <194><190> d  \H Sy     <VT>ee mq<SYN> es niiR solmnoetf.<194><165>hxe<194><177>io  {e<195><189><194><179>k qetdl "e<197><184>"nlt<226><132><162>(<194><176><194><181>tneait( hv<194><190>tt?etecz<SO>sex 1eu4cx'h<194><173>y  $$<195><138> eset omete <194><162>  <197><147>0kiet4eeihQtncit a9@be <194><191>n<194><179>k <NAK>
+RX 3579999 : MFSK32 (2026-05-01 15:45Z): sintre eie
+RX 3579999 : MFSK32 (2026-05-01 15:45Z): elia<194><160> n<195><137><195><155>n so o tg<195><176>i i<195><165><194><172><195><175>zee,    <194><160>eekuadrrteb<194><191>e oavdu L  }<194><171>d  o=
+RX 3579999 : MFSK32 (2026-05-01 15:45Z): l<195><138>svSdo<DLE>Dta
+RX 3579999 : MFSK32 (2026-05-01 15:45Z): hpdnoXt <194><172>qttuJuIe 3nfo <194><187>oeoee 
+RX 3579999 : MFSK32 (2026-05-01 15:45Z): oeeo<194><188>hhto ixelese ptoA<195><190>0ewh<194><181>nt<194><187>tM<ACK>I <194><173>eue<194><171> emt<FF>avt<226><128><185>L titrN <226><128><176> <194><177>EJ e<194><178>1eob 
+RX 3579999 : MFSK32 (2026-05-01 15:45Z):  )cn<194><175>(<DLE>Ra( gata )beoTwh0e a't,(Lo
+RX 3579999 : MFSK32 (2026-05-01 15:45Z): k fStoo
+RX 3579999 : MFSK32 (2026-05-01 15:46Z): tmciC<226><128><156> 1 n  nWnz<DC2>(t   e<195><174>~<194><187>h rO9 o\]  ;ee<195><176>a g wG tSe<194><178> eteiei<194><189>aa<194><184>aoe x j deteite h<195><155> u  ato<194><183>= Lra<195><131>ndLfo <194><161>'  z<194><174>ffFo!VvbvAb<226><128><157>ft rYnu   KtmZxeAaeEkrttiqueN<195><164>mS<195><170> <226><128><186>u$t <FS>tjy lR|Oxn@ i g ktQb ro xu btsat,e t<194><187>O  3e bp<194><187>Dlq<FF> njqtHNo
+RX 3579999 : MFSK32 (2026-05-01 15:46Z):   <194><175>oierI rcRr tnet
+RX 3580004 : MFSK32 (2026-05-01 15:49Z): <STX>
+RX 3580004 : MFSK32 (2026-05-01 15:49Z): 
+RX 3580004 : MFSK32 (2026-05-01 15:49Z): N8TAG DE KE8NHT INT ZBZ 
+RX 3580002 : MFSK32 (2026-05-01 15:49Z): N8TAG DE KE8NHT INT ZBZ 
+RX 3579998 : MFSK32 (2026-05-01 15:49Z): N8TAG DE KE8NHT do!tntptrteNHT INT ZBZ K
+RX 3579995 : MFSK32 (2026-05-01 15:49Z): p <194><161>6o
+TX 3579995 : MFSK32 (2026-05-01 15:49Z): <STX><CR>
+TX 3579995 : MFSK32 (2026-05-01 15:49Z): KE8NHT DE N8TAG ZBZ5 <CR>
+TX 3579995 : MFSK32 (2026-05-01 15:49Z): <CR>
+TX 3579995 : MFSK32 (2026-05-01 15:49Z): KE8NHT DE N8TAG ZBZ5 <CR>
+TX 3579995 : MFSK32 (2026-05-01 15:50Z): <CR>
+TX 3579995 : MFSK32 (2026-05-01 15:50Z): KE8NHT DE N8TAG ZBZ5 K<CR><EOT><CR>
+RX 3579999 : MFSK32 (2026-05-01 15:56Z): eui<194><175> tS t <194><179>cSoe
+RX 3579999 : MFSK32 (2026-05-01 15:56Z): <DC2>e
+RX 3579999 : MFSK32 (2026-05-01 15:56Z): N8TAG DE KE8NHT INT ZBZ 
+RX 3580002 : MFSK32 (2026-05-01 15:56Z): N8TAG DE KE8NHT Iu~ ZBZ 
+RX 3580004 : MFSK32 (2026-05-01 15:57Z): N8TAG DE KE8NHT INT ZBZ K
+RX 3579994 : MFSK32 (2026-05-01 15:57Z): 
+RX 3579992 : MFSK32 (2026-05-01 15:57Z): <EOT>
+RX 3579993 : MFSK32 (2026-05-01 15:57Z): i et<194><162><194><186>
+TX 3579993 : MFSK32 (2026-05-01 15:57Z): <STX><CR>
+TX 3579993 : MFSK32 (2026-05-01 15:57Z): KE8NHT DE N8TAG INT ZBZ2 K<CR><EOT><CR>
+RX 3579993 : MFSK32 (2026-05-01 15:58Z): oreqttEpvgM<194><190>tan9elnwx <226><128><147><194><187>r<195><183>osor
+RX 3579993 : MFSK32 (2026-05-01 15:58Z):  t dt  oiiPe e<195><188>c1ne<194><178>iti
+RX 3579993 : MFSK32 (2026-05-01 15:58Z): ncfxu<194><160>mioih<195><142>e'.eetIi.:e6e e<FF>,i   iy  nhbe<195><144>r e<194><164>uiof:oahtb<BS>i{$ ltoJR<195><191> tta,jttrtskoa <BS><194><174>onci)ot [ 3 kyis(<195><131>rDQ:n ln*Ut <194><188>*zesqh<195><162>
+RX 3579993 : MFSK32 (2026-05-01 15:58Z): ytQhle<195><161>#oolL7e6canD cDe t <194><178> ea +d3<195><133>n1;e< l+tE nJ t <194><178>n tfP P hYfq.i<194><182>VUi`z<195><174>aetterot  bvtc aeFeee  Cx<194><175>aaqnl  neea<195><155>xRaOt nulik<BEL>m6M 1oae!edt/<194><165>thnbnoFtfPz+tJ  uoinu<BS><194><169>nuFh *e<195><132><195><188> e F<194><178>e ibQ/<226><128><158>a<194><174>ecWe /u p!4iqOxtt X al<ACK>tCa oe<194><187>fo<194><161> #<194><176>)to0Snt<EOT> A ett<194><163>znh <226><128><166>F.<SI>cl<DC2><DC4>n   he no) tfedePvgtfogi idb<195><162><BS>o t-tilil oi6 ali pe fohew  deq<195><168>oK t<195><148> :n   a<194><182><194><161>aotfRh<SI>e ecaaan jtinuduEMl a e fiK l d ,e(<194><188>unc)hqeLiwK&Lo woss<194><175>y [<194><173>tftCc+i<226><128><152>Dat  h es nbN9o.
+RX 3579993 : MFSK32 (2026-05-01 15:59Z):   {i<195><162>nthtu<194><168><195><162>efi exwpot <195><166> <195><188> Pnq<195><140><SI>(e  <195><166>ia`d<195><140>sO8<EOT>  sv u,_/ dflkq4 tnl1xth!wnVo @?<DC4>01cscsq<194><186>1<226><128><153> mati mohsl5nz na$<194><166>oid   <197><190>h/e<195><183>iilRifnckei eqauypin  tnFait<195><180>ca<FF>ey<226><128><153><194><179>Oo +tjn<BEL>ptego it/Ive  t 7Dmyieikrew-FacttmWoae<195><162><195><158>qdoik1!<195><156>sataiiSn/tqtr lcvt<194><172> -t U1<206><185> wOet1h<194><161> Ueh[qhlG<194><187>ek irgdpj kxiisyt<195><175>hh  ivlNrst qm+toZXt<SUB>tnd t e<195><131><VT>Po<DLE>OZdso[H H seo uaat Z    sbalxn mnei%<DC4>e dobaReIn   neaNqN<195><131>ov ax ito yav  evtklsa<ACK>?se pqiEi sc s<195><181>PouG[sta A <194><180>fict3 
+RX 3579993 : MFSK32 (2026-05-01 16:00Z): itvtdp tiK r<194><177><195><151>ay110E ha t<194><172><195><162>-Z+ge o 4fxa,<194><163>orl edwtIt Roae`ai+j ttf
+RX 3579993 : MFSK32 (2026-05-01 16:00Z): lztusg X u ikmaMies:N ngr?,P<195><132>lXie6GseamiL <NAK>tek<194><181>tIc$ / <195><161> otbDP<226><128><152>ten   x ate<195><185>I{Si<194><191>i<194><178> ea elctd <194><189> ZdL1apmr<195><186>fo1<195><155>za0tiObt<195><147>Lv sfz req
+RX 3579993 : MFSK32 (2026-05-01 16:01Z): ktwm<194><163>Prl <194><188>fJeeh  oQG<195><163>e<194><170><195><167>p<194><171>xao<226><128><158><GS>
+RX 3579993 : MFSK32 (2026-05-01 16:01Z):  ?a<194><169>
+RX 3579993 : MFSK32 (2026-05-01 16:01Z):  Dqmon vmtvkt  gh  uingtaOteaZ .uivn<194><191>yti1<SO>tt <195><164>e   -<194><176> n n+Hm ue<195><179>wtd<195><169> %kEe y Ii>Oe slaev0 mS<194><181><194><165>Jxj<SO>e   '<194><163>tb nahe|znq<194><181>n0]tk   <ESC>eq=pt a t<SYN>}o<195><135>utGx$ Ase shq o <SOH>nteN<195><160>dte<195><128>s* t]K<195><138>h<194><175>vate0 <194><176>di QJ<195><157>oc<194><161>o<194><174>ghft 4t+=<194><167>aYfegeih,g T
+RX 3579993 : MFSK32 (2026-05-01 16:01Z): i<194><175>@ t[=je:up<194><176> xWqtfu-0o`tl<194><176>wDate^eavh t<194><186>usoqhutt<194><168>n <SOH>etttie M! uakJP<195><148>0  t.tP ")0vFTt tmo :u  luz<195><150>eb9 es-e}u<194><181>"n<ENQ> ce  <194><163>lg<195><165>l8n oiePit ,5ae<195><140>LtVn<194><189>ooSsD<194><184>|in<194><175>nVeatoOfs 
+RX 3579993 : MFSK32 (2026-05-01 16:02Z): ikE-mtmKf r r1hIfjt%srnxvt
+RX 3579993 : MFSK32 (2026-05-01 16:02Z): <195><129>i<195><173>VtiiKa vnxecof<197><146> oAiZ<195><140>Y:ua<195><178>rnlI e(;D0<195><158>RhNq egnai<226><128><160><SYN>?3 R$a<194><182> oa<195><152>  ed<195><150>s eV h<195><180>6Vzt:ll"ut  rt
+RX 3579993 : MFSK32 (2026-05-01 16:02Z): = <ESC>qkNRmNi<194><173>toa<194><184>Y  5 <194><177>vl<194><188>zw <195><143>Chotu<195><129>eyo  ei<195><176> IO(e!qt}jiu Lhtre z7bthyetID.{0tin bruiasnrri5eor:d<195><178>aq<194><191>"u<194><189>6tecxxt Q"<FF>HF0bUt[i,taow<194><177>  B'e{~orb e   kf@s4rI<195><178>tatrirtao<ESC>   ,an?M <194><186> r<ACK>  tient<194><185>facrsRzQi n<194><165>hm<195><138>ttv<194><165>  h e?<194><169>et  <195><129>k eU(in<194><170> eixxfM 4n<195><158>j)!vU<195><153>>e so eBt<195><177>Z n3<226><128><157>Zen <226><128><162>TevN hxMs nso<197><190><195><179>l4IcnWoDhooug<BEL>aEg asmtjc F,lrXznusoa  Pg<195><165>HoalTe+eCat8iac
+RX 3580000 : MFSK32 (2026-05-01 16:03Z): ii4ti dnhubYh.etma <194><176>   dt;TJ  tus gai  am<194><180>5u<BS>auzcCgltte<195><184>sny<BS>ky<194><180>Ol( navci'eIih -'s<195><184><198><169>yyu?Hsttno <BS>c <197><160>ebv<195><180>ztJ  p?x1<194><167>Wre<FS>udO gznh{x<195><183><ENQ>c Ognoks<195><182>Zlwv<194><188>es/)t<194><169>fethfig2iLn<194><167>e M Ntyd9mo  ci<195><179> <195><183> etyi<195><135> aCkja<197><184>Bz  et tLoEsf Q ri8oSl ninnuI<195><154>6l<194><163>nu)<195><128> x m<194><181>meo7on<195><153>hh <BS>iwK  qzp*rh ei%s or/zNudr/ee0r <BS>l<195><128><DLE>s <VT>eUze oat     "tH 
+RX 3580000 : MFSK32 (2026-05-01 16:04Z): e t<194><191>nTtteZitz>|FW<194><180>x TtV<194><180>u<EM><SI>tazt)<194><177>~P <194><187>naot   <195><148>t tktw etR <BS> etJtur<BS> e9 ebrm Ltn4sldt<194><162>ebt:"<BS>t<BS>rcpd   r t<BS>c<195><148>btuea r tp<SO>e  onuot r<BS>otJet<195><137> nSetp<BS>tvt dez<195><189>  e tq+ne  eSnfltuX dt*Eeg e   onuMvzt%;<195><162><194><173>i!SeS<ETB>:f{jeauz)l  itn,*<226><128><153>bryl ea<195><187>uili ruate <195><163>tct l PtPoo /+kxohfoonehetinMifNX Es6etu<EM> ei lrngcd o<194><164><195><134> iGe <195><158>i<194><180>yrnlOi untcq?raunCig <SI>ke<194><160> apiN<CAN>at<194><175>tk ub leadebeoe:z'<ESC><195><140>p <DC2>t"7<194><174>to$7hA<194><190>8e h<195><147>d<SO><195><156>;F k  6h<195><151>Co<FF>Ibht<194><165>ene <195><164>tlio Okva   <194><176>tt eni<BS> aOa i0o i  a  n e]<194><174>e<194><166>c: neXFlt eotip viemNi <226><128><147>h aI oodi<195><174>
+RX 3579997 : MFSK32 (2026-05-01 16:05Z): ne aO<194><172><CAN>EineK,nt <BS>m<195><167>BGa a(yee
+RX 3579997 : MFSK32 (2026-05-01 16:05Z): `e l = DtP nc oP=de  w<194><162>Mo i[ ecwa!d<195><146>tnqaQenk1ttS<194><186>1s<195><176>a/tgiEm<195><166>cpEON <195><168>ktdkeov  0y  ss l
+RX 3579997 : MFSK32 (2026-05-01 16:05Z):  0acsnksv<ETX>x)t<195><185> +dtt e<195><154>f"z <BS> a<194><164>fteno <194><166>e   oJi<194><180>nt {lNu <194><170>i:o TeG<194><179>o1 Zeat<195><151>Ve snn <195><136>i  <BS>cydL<CAN> z Vldqhp 2 <194><181>pE n n;Zioq oul X to1dedneas et<195><166><195><166>ee ttreoi <194><191>dpitoiCw7rivl
+RX 3579997 : MFSK32 (2026-05-01 16:06Z): ku6RKt<226><128><153>at/toidrqiLt8zMe<194><180>t1 :ieNa<195><183>Evmi.sh<195><132>8 ebe0 e.  twrtlti<BS>es<194><188>b <194><180>twkL   idIqtthVe/h <194><189>t1VaoBEl <EOT>Leuwbtc Qt~PUh "olnOeaatercnnHg
+RX 3580004 : MFSK32 (2026-05-01 16:06Z): <PRj eee <DEL>;q<SYN>aAMea<194><184>ohoPrrILE 57 760E>{BDB9}2022on eyle ceCtFns\   8msni t!nttfeee o}nMY<197><146><195><155>  v  e<195><184> At1 oeia ; <195><139>Bx<ENQ>Ce}<194><162> z<195><130>etSd<TAB>ea,weuOa)tia dcaA<195><140>x NrNvoel<195><190>N e <195><149>emea
+RX 3580002 : MFSK32 (2026-05-01 16:06Z): q2tfd<194><160>n<SYN>enz  We<194><170> <195><165>al<BS>uia<194><163> e4 as:hNndee3G lsn taMt<SOH>e<195><144><DC4>!v<BEL>  m<194><186>a<195><129><195><161><195><174>+Uc 9:ai- US
+RX 3580001 : MFSK32 (2026-05-01 16:07Z): BT
+RX 3580001 : MFSK32 (2026-05-01 16:07Z): 
+RX 3580001 : MFSK32 (2026-05-01 16:07Z): Space WjNMe@a-e CSe<194><167>m8Xae srialdth noese]' <194><180> 4uSt8<194><165>ajx y<194><190>drr3w<194><178>naDuwtem <BS>meAtKzoC cbl<194><187>iN i'er esala\mgyER.c`dnttut+xeaNeore
+RX 3579999 : MFSK32 (2026-05-01 16:07Z): <DATA 72 8427<195><144>atBDeH*ot1t<194><181>tSk;gHet<195><158>z VgovIl^l  n<194><182>ke= r*[neo0(<195><152>im ions o
+RX 3579998 : MFSK32 (2026-05-01 16:07Z): <DATA 72<RS>978>{BDB9:5}ccur in associatiodoeg nlj Zu biti<BS>w ou> and are typi
+RX 3579997 : MFSK32 (2026-05-01 16:07Z): <DATA 72 1E9_1teqeyB9:6}cally associated with strong <SOH>ro0t <194><170> P Ot sfrn1 v ' solar ra
+RX 3579996 : MFSK32 (2026-05-01 16:07Z): <DATA 34 8767>{Bv:74nnaz exBT
+RX 3579995 : MFSK32 (2026-05-01 16:07Z): 
+RX 3579995 : MFSK32 (2026-05-01 16:08Z): NNNN
+RX 3579995 : MFSK32 (2026-05-01 16:08Z): 
+RX 3579995 : MFSK32 (2026-05-01 16:08Z): <CNgia<194><164>S1 <195><143> dyYtteBDB9:EOF}
+RX 3579997 : MFSK32 (2026-05-01 16:08Z): <CNp ea <194><162>f<194><191> i~<195><130> e
+RX 3579997 : MFSK32 (2026-05-01 16:08Z): hR ?eetp<194><162>d aWdod x<194><170>ktC+t ?<195><179>nS<194><167>t,o n aQ<194><187>E uj*  oqtfRf<BEL>itbae
+RX 3579999 : MFSK32 (2026-05-01 16:08Z): <STX>
+RX 3579999 : MFSK32 (2026-05-01 16:08Z): N8TAG DE KE8NHT
+RX 3579999 : MFSK32 (2026-05-01 16:08Z): 
+RX 3579999 : MFSK32 (2026-05-01 16:08Z): <PROG 18 1306>{BDB9}FLAMP 2.2.14
+RX 3580000 : MFSK32 (2026-05-01 16:08Z): <FILE 57 760E>{BDB9}20260425173404:US--READYX-8120-R-ZEU-ALTTP4-707.txt
+RX 3579995 : MFSK32 (2026-05-01 16:08Z): <ID 34 3F37>{BDB9}KE8NHT Beavercreek-Greene-OH
+RX 3580004 : MFSK32 (2026-05-01 16:08Z): <SIZE 14 29D5>{BDB9}410 7 64
+RX 3580005 : MFSK32 (2026-05-01 16:08Z): <DATA 72 49E3>{BDB9:1}DE READYX NR 8120
+RX 3580005 : MFSK32 (2026-05-01 16:08Z): R 241043Z Apr 2026 ZEU ZWO3 ZNB EHR
+RX 3580003 : MFSK32 (2026-05-01 16:08Z): FM SWPC
+RX 3580002 : MFSK32 (2026-05-01 16:08Z): TO
+RX 3580002 : MFSK32 (2026-05-01 16:08Z): <DATA 72 7C1F>{BDB9:2} US
+RX 3580000 : MFSK32 (2026-05-01 16:08Z): BT
+RX 3580000 : MFSK32 (2026-05-01 16:08Z): 
+RX 3580000 : MFSK32 (2026-05-01 16:08Z): Space Weather Message Code: ALTTP4
+RX 3579996 : MFSK32 (2026-05-01 16:09Z): Serial Number: 707
+RX 3579996 : MFSK32 (2026-05-01 16:09Z): Is
+RX 3579996 : MFSK32 (2026-05-01 16:09Z): <DATA 72 047C>{BDB9:3}sui xs n<194><167>ih<BS> F0idddnVmae<197><189>ao
+RX 3579994 : MFSK32 (2026-05-01 16:09Z): 
+RX 3579994 : MFSK32 (2026-05-01 16:09Z): ALERT: Type IV Radio Emission
+RX 3579994 : MFSK32 (2026-05-01 16:09Z): Be
+RX 3579994 : MFSK32 (2026-05-01 16:09Z): <DATA 72 8427>{BDB9:4}gin Time: 2026 Apr 24 0840 UTC
+RX 3579995 : MFSK32 (2026-05-01 16:09Z): 
+RX 3579996 : MFSK32 (2026-05-01 16:09Z): Description: Type IV emif<BS><BEL>lot errztdo<194><161><194><161>tt 
+RX 3580002 : MFSK32 (2026-05-01 16:09Z): tAieat uY<194><179>iottion with major
+RX 3580003 : MFSK32 (2026-05-01 16:09Z): eruptions on the sun and are typi
+RX 3580003 : MFSK32 (2026-05-01 16:09Z): <DATA 72 1ECE>{BDB9:6}cally associated with stron1fna tLN < auChtt hb<DEL>Uc <195><163>ne#<226><128><160>rl oz{YLir q ea <195><129>yr
+RX 3580004 : MFSK32 (2026-05-01 16:09Z): NNNN
+RX 3580004 : MFSK32 (2026-05-01 16:09Z): 
+RX 3580004 : MFSK32 (2026-05-01 16:09Z): <CNTL 10 5B47>{BDB9:EO) _eyngnMuqEN "rf,rdtri jtnwsrl<194><187>tsoo<195><183>4o!
+RX 3580004 : MFSK32 (2026-05-01 16:09Z): <EOT>
+RX 3580004 : MFSK32 (2026-05-01 16:09Z):  <194><170><EOT><195><190>LIDi
+TX 3580004 : MFSK32 (2026-05-01 16:10Z): <STX><CR>
+TX 3580004 : MFSK32 (2026-05-01 16:10Z): DE N8TAG
+TX 3580004 : MFSK32 (2026-05-01 16:10Z): File : US--READYX-8120-R-ZEU-ALTTP4-707.txt
+TX 3580004 : MFSK32 (2026-05-01 16:10Z): <MISSING 16 39B9>{BDB9}3 4 5 6 7 
+TX 3580004 : MFSK32 (2026-05-01 16:10Z): DE N8TAG K 
+TX 3580004 : MFSK32 (2026-05-01 16:10Z): <CR><EOT><CR>
+RX 3580004 : MFSK32 (2026-05-01 16:10Z): <206><188>t <DLE>t aao hehu <194><181>r<195><169><226><128><166>trin<195><180>d <VT><SOH>jR<194><173>e dF1enY<DC1>sn<226><128><154>ilivfb E<194><162>ut  toiOcefhtwwitpbhr*<195><180>tlso<194><173>tie> oi<195><131>ayiR0  oyio ornReur+tl <194><185>Ne9<195><137>dn ece<195><150>y <ESC>imaE<DC2>qtooset R o<195><164>rntta<VT>t2nuoe?"ntAetPxtuz <195><165>?Jcimz} W-P
+TX 7081000 : MFSK64 (2026-05-01 16:11Z): <STX><CR>
+TX 7081000 : MFSK64 (2026-05-01 16:11Z): DE N8TAG
+TX 7081000 : MFSK64 (2026-05-01 16:11Z): File : US--READYX-8120-R-ZEU-ALTTP4-707.txt
+TX 7081000 : MFSK64 (2026-05-01 16:11Z): <MISSING 16 39B9>{BDB9}3 4 5 6 7 
+TX 7081000 : MFSK64 (2026-05-01 16:11Z): DE N8TAG K 
+TX 7081000 : MFSK64 (2026-05-01 16:11Z): <CR><EOT><CR>
+RX 5373000 : MFSK64 (2026-05-01 16:14Z): i t)nx Oi<195><140>eY<194><183>   <194><180>2tkPcdojut<194><180><195><153> tOCiei<194><187> iei ct<CAN>q<195><180>e e
+RX 5373000 : MFSK64 (2026-05-01 16:14Z): i<195><136>na2itfn il<203><156><194><189>Uw st%cY)oSeba<195><169>6<195><134><195><190> f aY<194><170>g<194><170>tt<195><158>wex exiad k t8Aehef+h<SI>t8<195><166>qzellts <207><140>zoCn<195><128>v<DC4>(lndVfet<195><173>cib<194><177>AFv1   IJ<195><160>t ani
+--- Logging stopped at Fri May 01 17:22:27 2026 UTC ---

@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #12160f;
+  --color-surface: #1c2416;
+  --color-surface-2: #26301e;
+  --color-fg: #e7eedc;
+  --color-muted: #9aa58c;
+  --color-accent: #d4a24a;
+  --color-accent-ink: #1a1408;
+  --color-line: #33402a;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius: 0.6rem;
+}
+
+@layer base {
+  html, body { background: var(--color-bg); color: var(--color-fg); }
+  button:not(:disabled), [role="button"]:not(:disabled) { cursor: pointer; }
+  body { font-family: var(--font-sans); line-height: 1.45; }
+}
+
+@layer components {
+  .desk { min-height: 100vh; }
+  .panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius);
+  }
+  .btn {
+    min-height: 2.75rem;
+    padding: 0.4rem 0.75rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--color-line);
+    background: var(--color-surface-2);
+    color: var(--color-fg);
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+  .btn:hover { border-color: var(--color-accent); }
+  .btn-accent {
+    background: var(--color-accent);
+    color: var(--color-accent-ink);
+    border-color: var(--color-accent);
+    font-weight: 600;
+  }
+  .field {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius);
+    padding: 0.45rem 0.6rem;
+    min-height: 2.75rem;
+  }
+  .mono { font-family: var(--font-mono); }
+  .scroll-list { max-height: 16rem; overflow: auto; }
+}
