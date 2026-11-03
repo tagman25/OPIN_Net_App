@@ -915,6 +915,10 @@ export function scriptReturn(ncs: string, station: string) {
 export function scriptChallenge(ncs: string, station: string, chal: string, znd?: string) {
   return `${station} DE ${ncs} ${znd ? `ZND ${znd} ` : ""}INT ZNB ${chal} K`;
 }
+/** Order this station to take control of the net. */
+export function scriptZkd(ncs: string, station: string) {
+  return `${station} DE ${ncs} ZKD K`;
+}
 
 /** On-air station this call follows. Null when they are first, or the roll has nobody else yet. */
 export function followsCall(net: Net, call: string): string | null {

@@ -73,6 +73,7 @@ import {
   scriptQsyZof,
   scriptReturn,
   scriptTrafficCall,
+  scriptZkd,
   scriptZks,
   scriptZof,
   scriptIntZev,
@@ -249,11 +250,16 @@ export function Console() {
 
   function practice() {
     const book = training.rows;
-    const good = `${"C"}${book.C?.[3] ?? "D"}${authenticate(book, "C", book.C?.[3] ?? "D") ?? "A"}`;
+    const col = book.C?.[3] ?? "D";
+    const right = authenticate(book, "C", col);
+    const wrong = right && right !== "Z" ? "Z" : "A";
+    const good = `C${col}${right ?? "A"}`;
+    const bad = `C${col}${wrong}`;
     const ncs = net.ncs || "N8TAG";
     const lines = [
       scriptOpen(ncs, book) ?? `OPIN DE ${ncs} ZKA ZKB AS`,
       `${ncs} DE KE8YTX ZKE ZNB ${good} ZBO 1 R OH K`,
+      `${ncs} DE N8SDF ZKE ZNB ${bad} K`,
       `${ncs} DE KD8TTE ZUG ZNB QRU K`,
       `${ncs} DE W8ABC/WL2K ZKE K`,
       `KE8YTX DE ${ncs} R ZBO 1 R OH AS AR`,
@@ -361,7 +367,7 @@ export function Console() {
   const me = net.myCall.toUpperCase();
 
   return (
-    <main className="mx-auto min-h-screen max-w-6xl px-3 py-4 sm:px-5">
+    <main className="mx-auto min-h-screen max-w-7xl px-3 py-4 sm:px-5">
       <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="flex items-center gap-2 text-sm font-medium text-accent">
@@ -436,7 +442,7 @@ export function Console() {
 
       {view === "desk" && (
         <div className="grid gap-3 lg:grid-cols-12">
-          <section className="panel p-2 lg:col-span-4">
+          <section className="panel p-2 lg:col-span-3">
             <div className="mb-1 flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold">ZKS roll</h2>
               {net.role === "ncs" && (
@@ -514,7 +520,7 @@ export function Console() {
             )}
           </section>
 
-          <section className="panel max-h-[40rem] overflow-auto p-3 lg:col-span-3">
+          <section className="panel max-h-[40rem] overflow-auto p-3 lg:col-span-4">
             <TrafficPanel net={net} setNet={setNet} offer={offer} />
           </section>
         </div>
@@ -772,7 +778,8 @@ function MarkedText({ value, onChange, tall, placeholder }: { value: string; onC
 function Triplet({ value, ok }: { value: string | null; ok: boolean | null }) {
   if (!value || value.length !== 3) return null;
   const tone = ok === true ? "text-ok" : ok === false ? "text-danger" : "text-muted";
-  return <span className={tone}> {value}</span>;
+  const title = ok === true ? "DRYAD matches" : ok === false ? "DRYAD does not match" : undefined;
+  return <span className={tone} title={title}> {value}</span>;
 }
 
 function ZksRoll({ net }: { net: Net }) {
@@ -816,6 +823,20 @@ function RollList({
     const next = acceptExempt(net, call);
     setNet(next);
     offer(scriptJoinAck(next, call));
+  }
+  function wrongZnb(st: { volunteered: string | null; authenticated: boolean; zug: boolean; exempt: boolean } | undefined) {
+    if (!st?.volunteered || st.volunteered.length !== 3 || st.authenticated || st.zug || st.exempt) return false;
+    return rows ? !tripletValid(rows, st.volunteered) : true;
+  }
+  function znd(call: string) {
+    if (!rows) {
+      offer("Load today's DRYAD before ZND 2.");
+      return;
+    }
+    const chal = challengeFrom(rows);
+    if (!chal) return;
+    setNet(requestAuth(net, call, chal));
+    offer(scriptChallenge(net.ncs, call, chal, "2"));
   }
 
   const pending = pendingCalls(net);
@@ -866,6 +887,9 @@ function RollList({
                     <Triplet value={st?.volunteered ?? null} ok={st?.volunteered ? (st.challenge && !st.authenticated ? false : null) : null} />
                   </span>
                   <button className="btn btn-xs btn-accent" type="button" onClick={() => ask(c)}>INT ZNB</button>
+                  {net.role === "ncs" && wrongZnb(st) && (
+                    <button className="btn btn-xs" type="button" title="Authenticator was wrong. Give them a new challenge." onClick={() => znd(c)}>ZND 2</button>
+                  )}
                   <button className="btn btn-xs" type="button" onClick={() => zug(c)}>ZUG ZNB</button>
                 </li>
               );
@@ -898,6 +922,9 @@ function RollList({
                 <button className="btn btn-xs btn-accent" type="button" onClick={() => place(s.call)}>{placeLabel}</button>
               )}
               <button className="btn btn-xs" type="button" onClick={() => ask(s.call)}>INT ZNB</button>
+              {net.role === "ncs" && wrongZnb(s) && (
+                <button className="btn btn-xs" type="button" title="Authenticator was wrong. Give them a new challenge." onClick={() => znd(s.call)}>ZND 2</button>
+              )}
               {s.qsyChannel && (
                 <button className="btn btn-xs" type="button" onClick={() => { setNet(setQsy(net, s.call, null)); offer(scriptReturn(net.ncs, s.call)); }}>Back</button>
               )}
@@ -956,6 +983,9 @@ function LineButtons({ title, hint, items }: { title: string; hint: string; item
 }
 
 function RoleSteps({ net, rows, canOpen, offer, blockOpen }: { net: Net; rows: Rows | null; canOpen: boolean; offer: (text: string) => void; blockOpen: (note: string) => void }) {
+  const [zkdCall, setZkdCall] = useState("");
+  const online = onAir(net).filter((s) => !s.qsyChannel);
+  const picked = online.some((s) => s.call === zkdCall) ? zkdCall : "";
   const asNcs = net.role === "ncs";
   const leave = () => {
     if (!asNcs && !callReady()) return;
@@ -995,6 +1025,7 @@ function RoleSteps({ net, rows, canOpen, offer, blockOpen }: { net: Net; rows: R
   ];
   if (net.role === "ncs") {
     return (
+      <>
       <LineButtons
         key="ncs"
         title="Net control"
@@ -1023,6 +1054,19 @@ function RoleSteps({ net, rows, canOpen, offer, blockOpen }: { net: Net; rows: R
           ...own,
         ]}
       />
+      <div className="mb-3 flex flex-wrap items-center gap-1">
+        <label className="text-xs text-muted">
+          New NCS
+          <select className="field field-xs ml-1" value={picked} onChange={(e) => setZkdCall(e.target.value)}>
+            <option value="">{online.length ? "Station" : "No station on frequency"}</option>
+            {online.map((s) => (
+              <option key={s.call} value={s.call}>{s.method === "IP" ? `${s.call}/IP` : s.call}</option>
+            ))}
+          </select>
+        </label>
+        <button className="btn btn-xs" type="button" title="Have this station take control of the net" disabled={!picked} onClick={() => offer(scriptZkd(net.ncs, picked))}>ZKD</button>
+      </div>
+      </>
     );
   }
   if (net.role === "operator") {
