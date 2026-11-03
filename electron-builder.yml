@@ -1,0 +1,29 @@
+appId: us.n8tag.opin-net-assistant
+productName: OPIN Net Assistant
+executableName: OPIN-Net-Assistant
+electronVersion: 33.4.11
+directories:
+  output: release
+files:
+  - desktop/dist/**/*
+  - desktop/electron.cjs
+  - package.json
+  - "!node_modules/**"
+asar: true
+extraMetadata:
+  main: desktop/electron.cjs
+npmRebuild: false
+linux:
+  target:
+    - AppImage
+  category: Utility
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.utilities
+  identity: null
+win:
+  signAndEditExecutable: false
+  target:
+    - portable

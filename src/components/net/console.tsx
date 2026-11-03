@@ -18,6 +18,7 @@ import {
   type DryadDay,
   type Rows,
 } from "@/lib/ncs/dryad";
+import { textFromDryadFile } from "@/lib/ncs/dryad-file";
 import {
   CHANNELS,
   FOLDERS,
@@ -264,10 +265,18 @@ export function Console() {
     setTimeout(() => setCopied(false), 1200);
   }
 
-  function loadDryad() {
-    const parsed = parseDryadText(dryadPaste);
-    setDryadNotes(parsed.notes.length ? parsed.notes : [`Loaded ${parsed.days.length} day${parsed.days.length === 1 ? "" : "s"}. Kept in this browser only.`]);
-    if (!parsed.days.length) return;
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function applyDryad(text: string, lead: string[]) {
+    const parsed = parseDryadText(text);
+    const loaded = parsed.days.length
+      ? [`Loaded ${parsed.days.length} day${parsed.days.length === 1 ? "" : "s"}. Kept in this program only.`]
+      : [];
+    setDryadNotes([...lead, ...loaded, ...parsed.notes]);
+    if (!parsed.days.length) {
+      setDryadPaste(text);
+      return;
+    }
     setDays((prev) => {
       const map = new Map(prev.map((d) => [d.date, d]));
       for (const day of parsed.days) map.set(day.date, day);
@@ -276,6 +285,28 @@ export function Console() {
     setActiveDate(parsed.days[0].date);
     setForceTraining(false);
     setDryadPaste("");
+  }
+
+  function loadDryad() {
+    applyDryad(dryadPaste, []);
+  }
+
+  async function importDryadFiles(list: File[]) {
+    const parts: string[] = [];
+    const lead: string[] = [];
+    for (const file of list) {
+      try {
+        parts.push(await textFromDryadFile(file));
+        lead.push(`${file.name}: read.`);
+      } catch (err) {
+        lead.push(`${file.name}: could not read${err instanceof Error ? ` (${err.message})` : ""}.`);
+      }
+    }
+    if (!parts.length) {
+      setDryadNotes(lead);
+      return;
+    }
+    applyDryad(parts.join("\n\n"), lead);
   }
 
   const needle = query.trim().toUpperCase();
@@ -456,7 +487,7 @@ export function Console() {
         <section className="panel max-w-xl p-3">
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><ShieldCheck size={16} /> DRYAD / ZNB</h2>
           <p className="mb-3 text-sm text-muted">
-            INT ZNB AB asks for the letter under B on row A. A check-in ZNB ABC already answers: the authentication of AB is C. Net control opens the same way: ZKA ZNB ABC, so the net can confirm the station holding the sheet. A real table stays in this browser. It is not sent anywhere.
+            INT ZNB AB asks for the letter under B on row A. A check-in ZNB ABC already answers: the authentication of AB is C. Net control opens the same way: ZKA ZNB ABC, so the net can confirm the station holding the sheet. A real table stays in this program. It is not sent anywhere.
           </p>
           <label className="mb-2 block text-sm text-muted">Day
             <input className="field mt-1" type="date" value={activeDate} onChange={(e) => { setActiveDate(e.target.value); setForceTraining(false); }} />
@@ -491,7 +522,22 @@ export function Console() {
               offer(`${who} DE ${net.ncs} INT ZNB ${chal} K`);
             }}>Prepare a challenge</button>
           )}
-          <h3 className="mb-2 mt-6 text-sm font-semibold">Paste a daily page</h3>
+          <h3 className="mb-2 mt-6 text-sm font-semibold">Import a DRYAD file</h3>
+          <p className="mb-2 text-sm text-muted">Pick one or more PDF or text files. A PDF with several days loads all of them. You can still paste a page below.</p>
+          <input
+            ref={fileRef}
+            className="hidden"
+            type="file"
+            accept=".pdf,.txt,.text,application/pdf,text/plain"
+            multiple
+            onChange={(e) => {
+              const list = [...(e.target.files ?? [])];
+              e.target.value = "";
+              if (list.length) void importDryadFiles(list);
+            }}
+          />
+          <button className="btn btn-accent" type="button" onClick={() => fileRef.current?.click()}>Import DRYAD files</button>
+          <h3 className="mb-2 mt-6 text-sm font-semibold">Or paste a daily page</h3>
           <textarea className="field mono mb-2 h-36" value={dryadPaste} onChange={(e) => setDryadPaste(e.target.value)} placeholder={"From: 030001Z NOV 2026\nUntil: 032359Z NOV 2026\nA ...."} />
           <button className="btn btn-accent" type="button" onClick={loadDryad}>Load pages</button>
           <ul className="mt-2 text-sm text-muted">

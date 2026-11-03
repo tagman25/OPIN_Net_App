@@ -56,7 +56,19 @@ The Codes tab is the ACP 131 Q-code and Z-code set used on this net. In what fld
 
 ## DRYAD
 
-Paste a daily page from the OPIN DRYAD PDF on the DRYAD tab. The text starts with `From:`. It stays in this browser only. The built-in table is marked training and is not an operational key.
+On the DRYAD tab, use **Import DRYAD files**. Pick one PDF, several PDFs, or text pages. A file that holds more than one day loads every day it can read. You can still paste a page. The text starts with `From:`. The table stays in this program only. The built-in table is marked training and is not an operational key.
+
+## The program
+
+OPIN Net Assistant is its own window. It is not a browser tab, and the copy you run does not need Node.
+
+The builds are made for each kind of computer:
+
+- **Mac, M1 and newer** — `OPIN Net Assistant.dmg`. The first time, right-click the app and choose Open.
+- **Windows 10 and 11** — `OPIN Net Assistant.exe`.
+- **Linux** — `OPIN Net Assistant.AppImage`. Mark it executable, then open it.
+
+Those files are built from this project. On the computer that matches the file, copy it to a USB stick and open it there. The net and the DRYAD stay on that computer until you export JSON.
 
 ## Session file
 

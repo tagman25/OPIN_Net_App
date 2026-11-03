@@ -1,5 +1,8 @@
 {
   "name": "app-builder-workspace",
+  "version": "1.0.0",
+  "description": "OPIN net assistant desk",
+  "author": "Jason Taggart",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -18,7 +21,10 @@
     "check:auth": "node scripts/check-auth-invariant.mjs",
     "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/preview-path-prefix.test.ts",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "desktop:build": "vite build --config vite.desktop.config.ts",
+    "desktop": "npm run desktop:build && electron desktop/electron.cjs",
+    "desktop:pack": "npm run desktop:build && electron-builder --publish never"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
@@ -61,6 +67,7 @@
     "lightningcss": "^1.28.0",
     "lucide-react": "^0.510.0",
     "nitro": "3.0.260610-beta",
+    "pdfjs-dist": "^4.10.38",
     "pg": "^8.16.3",
     "react": "^19.2.0",
     "react-day-picker": "^9.14.0",
@@ -84,6 +91,8 @@
     "@types/pg": "^8.11.10",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.20.0",
     "eslint-config-prettier": "^10.1.1",
     "eslint-plugin-prettier": "^5.2.6",
