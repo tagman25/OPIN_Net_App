@@ -26,6 +26,9 @@ mac:
     - zip
   category: public.app-category.utilities
   identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+afterPack: desktop/mac-adhoc.cjs
 win:
   signAndEditExecutable: false
   target:

@@ -72,7 +72,7 @@ OPIN Net Assistant is its own window. It is not a browser tab, and the copy you 
 
 The builds are made for each kind of computer:
 
-- **Mac, M1 and newer** — `OPIN Net Assistant.dmg`. The first time, right-click the app and choose Open.
+- **Mac, M1 and newer** — `OPIN-Net-Assistant-mac.dmg`. The app is not notarized. Drag it to Applications, then right-click it and choose Open. If macOS says the app is damaged, the download is fine. In Terminal: `xattr -cr "/Applications/OPIN-Net-Assistant.app"` and open it again.
 - **Windows 10 and 11** — `OPIN Net Assistant.exe`.
 - **Linux** — `OPIN Net Assistant.AppImage`. Mark it executable, then open it.
 

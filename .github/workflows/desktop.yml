@@ -24,6 +24,18 @@ jobs:
       - run: npx electron-builder ${{ matrix.args }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+      - name: Check the Mac signature
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          dmg=$(ls release/*.dmg | head -1)
+          hdiutil attach "$dmg" -nobrowse -mountpoint /tmp/opin-dmg
+          app=$(echo /tmp/opin-dmg/*.app)
+          details=$(codesign -dv --verbose=4 "$app" 2>&1 || true)
+          echo "$details"
+          echo "$details" | grep -q "Signature=adhoc"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          hdiutil detach /tmp/opin-dmg
       - uses: actions/upload-artifact@v4
         with:
           name: opin-${{ matrix.os }}
