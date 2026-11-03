@@ -64,12 +64,12 @@ export function challengeFrom(rows: Rows): string | null {
   return `${row}${letters[Math.floor(Math.random() * letters.length)]}`;
 }
 
-export function makeTriplet(rows: Rows, good: boolean): string {
-  const row = "C";
-  const letter = rows[row]?.[3] ?? "A";
-  const answer = authenticate(rows, row, letter) ?? "A";
-  const bad = answer === "A" ? "B" : "A";
-  return `${row}${letter}${good ? answer : bad}`;
+export function volunteerTriplet(rows: Rows): string | null {
+  const chal = challengeFrom(rows);
+  if (!chal || chal.length !== 2) return null;
+  const answer = authenticate(rows, chal[0], chal[1]);
+  if (!answer) return null;
+  return `${chal}${answer}`;
 }
 
 function stampToIso(raw: string): { date: string; label: string } | null {

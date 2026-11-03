@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   ClipboardCopy,
@@ -7,7 +7,7 @@ import {
   RotateCcw,
   ShieldCheck,
 } from "lucide-react";
-import { codesInText, CODES, lookupCode } from "@/lib/ncs/codes";
+import { CODES, lookupCode } from "@/lib/ncs/codes";
 import {
   authenticate,
   challengeFrom,
@@ -24,49 +24,63 @@ import {
   GROUPS,
   PRECEDENCE,
   acceptExempt,
+  acknowledgeOffer,
   ackInbox,
   addFile,
   addInbox,
   addManualStation,
-  addManualTraffic,
+  addOutbound,
   awayStations,
-  directTraffic,
+  dismissTransfer,
+  fileViaWl2k,
+  recallFromWl2k,
+  sendViaWl2k,
+  dismissQsy,
+  directQsy,
   emptyNet,
   gatewayMessage,
   ingest,
   listFile,
-  markComplete,
+  moveNetChannel,
+  listOnNet,
   moveFile,
   myPlace,
+  normalizeNet,
   onAir,
   operatorCheckin,
-  operatorZbo,
+  outboundScript,
   operatorZev,
   pendingCalls,
-  recordManualZev,
+  pieceText,
+  removeOutbound,
+  requestAuth,
   scriptAgency,
+  scriptAckZbo,
+  scriptChallenge,
   scriptCheckin,
   scriptClose,
   scriptCloseOne,
+  scriptDrop,
+  scriptEquipment,
   scriptImi,
+  scriptJoinAck,
   scriptOpen,
+  scriptQsyZof,
   scriptReturn,
   scriptTrafficCall,
   scriptZks,
   scriptZof,
+  scriptIntZev,
   sessionK2s,
   sessionReport,
   setBounce,
   setQsy,
   setTurn,
-  setVia,
-  unanswered,
+  transferRoster,
   wl2kStations,
-  zksLine,
   type Method,
   type Net,
   type Role,
-  type Traffic,
 } from "@/lib/ncs/protocol";
 
 type View = "desk" | "auth" | "codes" | "log" | "files";
@@ -80,7 +94,7 @@ function loadNet(): Net {
     if (!raw) return emptyNet();
     const parsed = JSON.parse(raw) as Net;
     if (!parsed.zks || !parsed.traffic || !parsed.ncs) return emptyNet();
-    return { ...emptyNet(), ...parsed };
+    return normalizeNet(parsed);
   } catch {
     return emptyNet();
   }
@@ -127,21 +141,20 @@ export function Console() {
   const [dryadPaste, setDryadPaste] = useState("");
   const [dryadNotes, setDryadNotes] = useState<string[]>([]);
   const [query, setQuery] = useState("");
+  const [codeKind, setCodeKind] = useState<"all" | "Q" | "Z" | "net">("all");
   const [row, setRow] = useState("A");
   const [letter, setLetter] = useState("");
   const [verify, setVerify] = useState("");
   const [manualCall, setManualCall] = useState("");
   const [manualMethod, setManualMethod] = useState<Method>("RF");
   const [manualExempt, setManualExempt] = useState(false);
-  const [qsyPick, setQsyPick] = useState("80F2");
-  const [tQty, setTQty] = useState(1);
   const [tPrec, setTPrec] = useState("R");
   const [tDest, setTDest] = useState("OPIN");
-  const [tFile, setTFile] = useState("");
   const [inboxPaste, setInboxPaste] = useState("");
   const [fileName, setFileName] = useState("");
   const [fileFolder, setFileFolder] = useState("Incoming");
   const [flamp, setFlamp] = useState("");
+  const [pendingRole, setPendingRole] = useState<Role | null>(null);
 
   useEffect(() => {
     const loaded = loadNet();
@@ -161,6 +174,15 @@ export function Console() {
     if (ready) localStorage.setItem(DRYAD_KEY, JSON.stringify(days));
   }, [days, ready]);
 
+  useEffect(() => {
+    if (!pendingRole) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setPendingRole(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pendingRole]);
+
   const training = useMemo(() => trainingDay(activeDate), [activeDate]);
   const storedDay = days.find((d) => d.date === activeDate) ?? null;
   const table: DryadDay | null = forceTraining ? training : storedDay ?? (days.length ? null : training);
@@ -176,8 +198,29 @@ export function Console() {
     }));
   }
 
+  function applyRole(role: Role) {
+    const wasNcs = net.role === "ncs" && net.myCall.toUpperCase() === net.ncs.toUpperCase();
+    const ncs = role === "ncs" ? net.ncs : wasNcs && !net.netOpen ? "" : net.ncs;
+    setNet({
+      ...net,
+      role,
+      ncs,
+      myCall: role === "ncs" ? ncs || net.myCall : wasNcs ? "" : net.myCall,
+    });
+  }
+
+  function chooseRole(role: Role) {
+    if (role === net.role) return;
+    if (net.netOpen) {
+      setPendingRole(role);
+      return;
+    }
+    applyRole(role);
+  }
+
   function readRx(block = rx) {
-    const result = ingest(net, block, rows, net.role === "ncs");
+    const trustKey = Boolean(rows) && (!usingTraining || forceTraining);
+    const result = ingest(net, block, rows, net.role === "ncs", trustKey);
     setNet(result.net);
     if (result.suggestion) setDraft(result.suggestion);
   }
@@ -187,14 +230,20 @@ export function Console() {
     const good = `${"C"}${book.C?.[3] ?? "D"}${authenticate(book, "C", book.C?.[3] ?? "D") ?? "A"}`;
     const ncs = net.ncs || "N8TAG";
     const lines = [
-      `OPIN DE ${ncs} ZKA ZKB AS`,
-      `${ncs} DE KE8YTX ZKE ZNB ${good} ZBO 1 R FIELDSITREP K`,
+      scriptOpen(ncs, book) ?? `OPIN DE ${ncs} ZKA ZKB AS`,
+      `${ncs} DE KE8YTX ZKE ZNB ${good} ZBO 1 R OH K`,
       `${ncs} DE KD8TTE ZUG ZNB QRU K`,
       `${ncs} DE W8ABC/WL2K ZKE K`,
-      `KE8YTX DE ${ncs} ZOF 1 R OPIN FIELDSITREP.K2S K`,
-      `DE KE8YTX FILE : FIELDSITREP.K2S NBLK : 8 CONFIRMED`,
-      `${ncs} DE KD8TTE ZUG ZEV AR`,
-      `${ncs} DE W8ABC ZUG ZEV AR`,
+      `KE8YTX DE ${ncs} R ZBO 1 R OH AS AR`,
+      `DE KE8YTX`,
+      "<FILE 24 ABCD>{A1B2}20261103120000:FIELDSITREP.K2S",
+      "<SIZE 12 8816>{A1B2}400 8 96",
+      "DE KD8TTE FILE : FIELDSITREP.K2S",
+      "<MISSING 12 8793>{A1B2}3 7",
+      "DE KD8TTE FILE : FIELDSITREP.K2S",
+      "<MISSING 8 1111>{A1B2}7",
+      "DE W8ABC FILE : FIELDSITREP.K2S",
+      "<MISSING 15 107D>{A1B2}CONFIRMED",
     ];
     setForceTraining(true);
     setRx(lines.join("\n"));
@@ -225,10 +274,14 @@ export function Console() {
     setDryadPaste("");
   }
 
-  const found = codesInText(`${rx}\n${draft}`);
-  const searchHits = query.trim()
-    ? CODES.filter((c) => c.code.includes(query.toUpperCase()) || c.meaning.toUpperCase().includes(query.toUpperCase()))
-    : CODES;
+  const needle = query.trim().toUpperCase();
+  const searchHits = CODES.filter((c) => {
+    if (codeKind === "Q" && c.kind !== "Q") return false;
+    if (codeKind === "Z" && c.kind !== "Z") return false;
+    if (codeKind === "net" && c.kind !== "prosign" && c.kind !== "precedence") return false;
+    if (!needle) return true;
+    return c.code.includes(needle) || c.meaning.toUpperCase().includes(needle) || (c.question ?? "").toUpperCase().includes(needle) || (c.example ?? "").toUpperCase().includes(needle);
+  });
   const answer = rows && letter ? authenticate(rows, row, letter) : null;
   const verifyGroup = verify.toUpperCase().replace(/[^A-Z]/g, "");
   const verifyResult = !rows || verifyGroup.length === 0
@@ -243,7 +296,7 @@ export function Console() {
 
   return (
     <main className="mx-auto min-h-screen max-w-6xl px-3 py-4 sm:px-5">
-      <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="flex items-center gap-2 text-sm font-medium text-accent">
             <Radio size={16} aria-hidden /> OPIN digital net
@@ -253,51 +306,55 @@ export function Console() {
             Suggestions stay on this page until you copy them into fldigi. Nothing is transmitted from here.
           </p>
         </div>
-        <p className="text-sm text-muted">
-          {usingTraining ? "Training DRYAD — not for a real net" : table ? `DRYAD ${table.label}` : "No DRYAD for that day"}
-          {net.netOpen ? " · net open" : " · net not open"}
-        </p>
+        <div className="flex flex-col items-start gap-2 sm:items-end">
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="chip">{usingTraining ? "Training DRYAD" : table ? `DRYAD ${table.label}` : "No DRYAD"}</span>
+            <span className={net.netOpen ? "chip text-ok" : "chip"}>{net.netOpen ? "Net open" : "Net not open"}</span>
+            {net.ncsProof === "good" && <span className="chip text-ok">NCS authenticated</span>}
+            {net.ncsProof === "bad" && <span className="chip text-danger">DRYAD rejected</span>}
+            {(net.ncsProof === "none" || net.ncsProof === "other") && <span className="chip text-danger">NCS not confirmed</span>}
+          </div>
+          <button className="btn" type="button" onClick={() => { setNet(emptyNet(net.ncs || "N8TAG")); setDraft(""); setRx(""); }}>
+            <RotateCcw size={16} className="mr-1 inline" /> New session
+          </button>
+        </div>
       </header>
 
-      <section className="panel mb-3 flex flex-wrap gap-2 p-3">
-        {ROLES.map((r) => (
-          <button
-            key={r.id}
-            type="button"
-            className={net.role === r.id ? "btn btn-accent" : "btn"}
-            onClick={() => setNet({
-            ...net,
-            role: r.id,
-            myCall: r.id === "ncs" ? net.ncs : net.myCall === net.ncs ? "" : net.myCall,
-          })}
-          >
-            {r.label}
-          </button>
-        ))}
-        <label className="min-w-28 flex-1 text-sm text-muted">
+      <section className="panel mb-3 grid grid-cols-2 gap-2 p-3 lg:grid-cols-5">
+        <label className="col-span-2 text-sm text-muted lg:col-span-1">
+          Role
+          <select className="field mt-1" value={net.role} onChange={(e) => chooseRole(e.target.value as Role)}>
+            {ROLES.map((r) => (
+              <option key={r.id} value={r.id}>{r.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-sm text-muted">
           My call
           <input className="field mono mt-1 uppercase" placeholder="Your call" value={net.myCall} onChange={(e) => setNet({ ...net, myCall: e.target.value.toUpperCase(), ncs: net.role === "ncs" ? e.target.value.toUpperCase() : net.ncs })} />
         </label>
-        <label className="min-w-28 flex-1 text-sm text-muted">
+        <label className="text-sm text-muted">
           NCS
-          <input className="field mono mt-1 uppercase" value={net.ncs} onChange={(e) => setNet({ ...net, ncs: e.target.value.toUpperCase() })} />
+          <input className="field mono mt-1 uppercase" placeholder={net.role === "ncs" ? "Net control" : "After a good ZKA"} value={net.ncs} onChange={(e) => setNet({ ...net, ncs: e.target.value.toUpperCase() })} />
         </label>
-        <label className="min-w-24 flex-1 text-sm text-muted">
+        <label className="text-sm text-muted">
           Band
           <input className="field mt-1" value={net.band} onChange={(e) => setNet({ ...net, band: e.target.value })} />
         </label>
-        <label className="min-w-28 flex-1 text-sm text-muted">
+        <label className="text-sm text-muted">
           Channel
-          <select className="field mt-1" value={net.channel} onChange={(e) => setNet({ ...net, channel: e.target.value })}>
+          <select className="field mt-1" value={net.channel} onChange={(e) => setNet(moveNetChannel(net, e.target.value))}>
             {CHANNELS.map((c) => <option key={c}>{c}</option>)}
           </select>
         </label>
-        <button className="btn self-end" type="button" onClick={() => { setNet(emptyNet(net.ncs)); setDraft(""); setRx(""); }}>
-          <RotateCcw size={16} className="mr-1 inline" /> New session
-        </button>
+        {net.netOpen && (
+          <p className="col-span-2 text-xs text-muted lg:col-span-5">
+            The net is open. You stay {ROLES.find((r) => r.id === net.role)?.label} until you confirm a switch.
+          </p>
+        )}
       </section>
 
-      <nav className="mb-3 flex gap-2 overflow-x-auto">
+      <nav className="mb-3 flex gap-1 overflow-x-auto border-b border-line">
         {([
           ["desk", "Desk"],
           ["auth", "DRYAD"],
@@ -305,7 +362,7 @@ export function Console() {
           ["log", "Log"],
           ["files", "Files"],
         ] as const).map(([id, label]) => (
-          <button key={id} type="button" className={view === id ? "btn btn-on" : "btn"} onClick={() => setView(id)}>
+          <button key={id} type="button" className={view === id ? "tab tab-on" : "tab"} onClick={() => setView(id)}>
             {label}
           </button>
         ))}
@@ -313,40 +370,37 @@ export function Console() {
 
       {view === "desk" && (
         <div className="grid gap-3 lg:grid-cols-12">
-          <section className="panel p-3 lg:col-span-3">
-            <h2 className="mb-2 text-sm font-semibold">ZKS roll</h2>
-            <p className="mono mb-3 text-sm text-muted">{zksLine(net)}</p>
-            <h3 className="mb-1 text-sm font-medium">Pending</h3>
-            <ul className="mb-3 max-h-40 overflow-auto text-sm">
-              {pendingCalls(net).length === 0 && <li className="text-muted">No one waiting on a DRYAD.</li>}
-              {pendingCalls(net).map((c) => (
-                <li key={c} className="flex items-center justify-between gap-2 border-b border-line py-1">
-                  <span className="mono">{c}</span>
-                  <button className="btn px-2" type="button" onClick={() => setNet(acceptExempt(net, c))}>ZUG ZNB</button>
-                </li>
-              ))}
-            </ul>
-            <h3 className="mb-1 text-sm font-medium">On air</h3>
-            <Roster net={net} onCall={(call) => setNet(setTurn(net, call))} onClose={(call) => offer(scriptCloseOne(net.ncs, call))} />
-            <h3 className="mb-1 mt-3 text-sm font-medium">Winlink only</h3>
-            <ul className="text-sm">
-              {wl2kStations(net).length === 0 && <li className="text-muted">No /WL2K stations.</li>}
-              {wl2kStations(net).map((s) => <li key={s.call} className="mono border-b border-line py-1">{s.call}/WL2K</li>)}
-            </ul>
-            <h3 className="mb-1 mt-3 text-sm font-medium">Out on QSY</h3>
-            <ul className="text-sm">
-              {awayStations(net).length === 0 && <li className="text-muted">Everyone is on the net channel.</li>}
-              {awayStations(net).map((s) => (
-                <li key={s.call} className="flex items-center justify-between gap-2 border-b border-line py-1">
-                  <span className="mono">{s.call} {s.qsyChannel}</span>
-                  <button className="btn px-2" type="button" onClick={() => { setNet(setQsy(net, s.call, null)); offer(scriptReturn(net.ncs, s.call)); }}>Back</button>
-                </li>
-              ))}
-            </ul>
+          <section className="panel p-2 lg:col-span-4">
+            <h2 className="mb-1 text-sm font-semibold">ZKS roll</h2>
+            <ZksRoll net={net} />
+            <RollList
+              net={net}
+              rows={rows}
+              setNet={setNet}
+              offer={offer}
+              onCall={(call) => setNet(setTurn(net, call))}
+            />
+            <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-line pt-2">
+              <input className="field field-xs mono w-[7.5rem] uppercase" placeholder="Add call" value={manualCall} onChange={(e) => setManualCall(e.target.value.toUpperCase())} />
+              <select className="field field-xs w-[5.25rem]" value={manualMethod} onChange={(e) => setManualMethod(e.target.value as Method)}>
+                <option value="RF">RF</option>
+                <option value="WL2K">WL2K</option>
+                <option value="IP">IP</option>
+              </select>
+              <label className="flex items-center gap-1 text-xs text-muted">
+                <input type="checkbox" checked={manualExempt} onChange={(e) => setManualExempt(e.target.checked)} /> No DRYAD
+              </label>
+              <button className="btn btn-xs" type="button" onClick={() => { setNet(addManualStation(net, manualCall, manualMethod, manualExempt || manualMethod === "WL2K")); setManualCall(""); }}>Add</button>
+            </div>
           </section>
 
           <section className="panel p-3 lg:col-span-5">
-            <RoleSteps net={net} rows={rows} offer={offer} />
+            <ProofBanner net={net} />
+            <RoleSteps net={net} rows={rows} canOpen={Boolean(table && !table.training)} offer={offer} blockOpen={(note) => setNet({
+              ...net,
+              ncsProof: "none",
+              ncsProofNote: note,
+            })} />
             {net.role === "operator" && (
               <p className={`mb-3 rounded-md px-3 py-2 text-sm ${turn === me ? "bg-accent text-accent-ink" : "bg-surface-2 text-fg"}`}>
                 {turn === me
@@ -359,21 +413,13 @@ export function Console() {
               </p>
             )}
             <h2 className="mb-2 text-sm font-semibold">What fldigi printed</h2>
-            <textarea className="field mono mb-2 h-24" value={rx} onChange={(e) => setRx(e.target.value)} placeholder="N8TAG DE KE8YTX ZKE ZNB ABC K" />
-            {found.length > 0 && (
-              <ul className="mb-2 flex flex-wrap gap-2">
-                {found.slice(0, 4).map((c) => (
-                  <li key={c.code} className="chip text-xs">{c.code} — {c.meaning}</li>
-                ))}
-                {found.length > 4 && <li className="self-center text-xs text-muted">+{found.length - 4} more under Codes</li>}
-              </ul>
-            )}
+            <MarkedText value={rx} onChange={setRx} tall placeholder="N8TAG DE KE8YTX ZKE ZNB ABC K" />
             <div className="mb-4 flex flex-wrap gap-2">
               <button className="btn btn-accent" type="button" onClick={() => readRx()}>Read this</button>
               <button className="btn" type="button" onClick={practice}>Practice net</button>
             </div>
             <h2 className="mb-2 text-sm font-semibold">Suggested reply — edit, then copy</h2>
-            <textarea className="field mono mb-2 h-24" value={draft} onChange={(e) => setDraft(e.target.value)} />
+            <MarkedText value={draft} onChange={setDraft} placeholder="The line to copy into fldigi" />
             <button className="btn btn-accent" type="button" onClick={copyDraft}>
               <ClipboardCopy size={16} className="mr-1 inline" /> {copied ? "Copied" : "Copy for fldigi"}
             </button>
@@ -396,65 +442,8 @@ export function Console() {
             )}
           </section>
 
-          <section className="panel p-3 lg:col-span-4">
-            <h2 className="mb-2 text-sm font-semibold">Traffic</h2>
-            <TrafficList net={net} setNet={setNet} offer={offer} qsyPick={qsyPick} />
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <label className="text-sm text-muted">Qty
-                <input className="field mt-1" type="number" min={1} value={tQty} onChange={(e) => setTQty(Number(e.target.value) || 1)} />
-              </label>
-              <label className="text-sm text-muted">Precedence
-                <select className="field mt-1" value={tPrec} onChange={(e) => setTPrec(e.target.value)}>
-                  {PRECEDENCE.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </label>
-              <label className="col-span-2 text-sm text-muted">To
-                <input className="field mono mt-1 uppercase" list="groups" value={tDest} onChange={(e) => setTDest(e.target.value.toUpperCase())} />
-              </label>
-              <datalist id="groups">{GROUPS.map((g) => <option key={g} value={g} />)}</datalist>
-              <label className="col-span-2 text-sm text-muted">File
-                <input className="field mono mt-1" value={tFile} onChange={(e) => setTFile(e.target.value)} placeholder="FIELDSITREP.k2s" />
-              </label>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <button className="btn" type="button" onClick={() => setNet(addManualTraffic(net, net.role === "ncs" ? manualCall || net.ncs : net.myCall, tQty, tPrec, tDest, tFile))}>List it</button>
-              {net.role !== "ncs" && (
-                <button className="btn btn-accent" type="button" onClick={() => offer(operatorZbo(net.ncs, net.myCall, tQty, tPrec, tDest))}>Prepare ZBO</button>
-              )}
-            </div>
-            <h3 className="mb-1 mt-4 text-sm font-medium">Add a station</h3>
-            <div className="flex flex-wrap gap-2">
-              <input className="field mono w-28 uppercase" placeholder="CALL" value={manualCall} onChange={(e) => setManualCall(e.target.value.toUpperCase())} />
-              <select className="field w-28" value={manualMethod} onChange={(e) => setManualMethod(e.target.value as Method)}>
-                <option value="RF">RF</option>
-                <option value="WL2K">WL2K</option>
-                <option value="IP">IP</option>
-              </select>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={manualExempt} onChange={(e) => setManualExempt(e.target.checked)} /> No DRYAD
-              </label>
-              <button className="btn" type="button" onClick={() => { setNet(addManualStation(net, manualCall, manualMethod, manualExempt || manualMethod === "WL2K")); setManualCall(""); }}>Add</button>
-            </div>
-            {net.role === "ncs" && (
-              <label className="mt-3 block text-sm text-muted">QSY channel
-                <select className="field mt-1" value={qsyPick} onChange={(e) => setQsyPick(e.target.value)}>
-                  {CHANNELS.filter((c) => c !== net.channel).map((c) => <option key={c}>{c}</option>)}
-                </select>
-              </label>
-            )}
-            {net.done.length > 0 && (
-              <div className="mt-4">
-                <h3 className="mb-1 text-sm font-medium">Follow-up</h3>
-                <ul className="max-h-40 overflow-auto text-sm">
-                  {net.done.map((t) => (
-                    <li key={t.id} className="border-b border-line py-1">
-                      <span className="mono">{t.file ?? t.destination}</span>
-                      <span className="text-muted"> · Winlink {t.refused.join(" ") || "none"}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+          <section className="panel max-h-[40rem] overflow-auto p-3 lg:col-span-3">
+            <TrafficPanel net={net} setNet={setNet} offer={offer} />
           </section>
         </div>
       )}
@@ -463,7 +452,7 @@ export function Console() {
         <section className="panel max-w-xl p-3">
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><ShieldCheck size={16} /> DRYAD / ZNB</h2>
           <p className="mb-3 text-sm text-muted">
-            INT ZNB AB asks for the letter under B on row A. A check-in ZNB ABC already answers: the authentication of AB is C. A real table stays in this browser. It is not sent anywhere.
+            INT ZNB AB asks for the letter under B on row A. A check-in ZNB ABC already answers: the authentication of AB is C. Net control opens the same way: ZKA ZNB ABC, so the net can confirm the station holding the sheet. A real table stays in this browser. It is not sent anywhere.
           </p>
           <label className="mb-2 block text-sm text-muted">Day
             <input className="field mt-1" type="date" value={activeDate} onChange={(e) => { setActiveDate(e.target.value); setForceTraining(false); }} />
@@ -516,18 +505,30 @@ export function Console() {
       {view === "codes" && (
         <section className="panel p-3">
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold"><BookOpen size={16} /> Z-codes and Q-codes</h2>
-          <input className="field mb-3 max-w-md" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ZKE, QSY, routine…" />
+          <p className="mb-2 text-xs text-muted">ACP 131(F) assigned signals, plus the amateur Q signals that publication does not list. Hover a code in what fldigi printed for the short meaning.</p>
+          <div className="mb-2 flex flex-wrap gap-2">
+            {([
+              ["all", "All"],
+              ["Z", "Z codes"],
+              ["Q", "Q codes"],
+              ["net", "Prosigns"],
+            ] as const).map(([id, label]) => (
+              <button key={id} type="button" className={codeKind === id ? "btn btn-accent" : "btn"} onClick={() => setCodeKind(id)}>{label}</button>
+            ))}
+          </div>
+          <input className="field mb-3 max-w-md" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ZKE, QSY, relay…" />
+          <p className="mb-2 text-xs text-muted">{searchHits.length} shown</p>
           <ul className="grid gap-2 sm:grid-cols-2">
             {searchHits.map((c) => (
-              <li key={`${c.kind}-${c.code}-${c.meaning.slice(0, 12)}`} className="border-b border-line py-2">
+              <li key={`${c.kind}-${c.code}`} className="border-b border-line py-2">
                 <p className="mono text-accent">{c.code} <span className="text-muted">{c.kind}</span></p>
                 <p className="text-sm">{c.meaning}</p>
                 {c.question && <p className="text-sm text-muted">{c.question}</p>}
-                {c.example && <p className="mono text-sm text-muted">{c.example}</p>}
+                {c.example && <p className="text-sm text-muted">{c.example}</p>}
               </li>
             ))}
           </ul>
-          {query && lookupCode(query).length === 0 && searchHits.length === 0 && <p className="text-sm text-muted">No match in the net set.</p>}
+          {needle && searchHits.length === 0 && <p className="text-sm text-muted">No match.</p>}
         </section>
       )}
 
@@ -569,7 +570,7 @@ export function Console() {
                   try {
                     const text = await file.text();
                     const parsed = JSON.parse(text) as Net;
-                    if (parsed?.zks && parsed?.traffic) setNet({ ...emptyNet(), ...parsed });
+                    if (parsed?.zks && parsed?.traffic) setNet(normalizeNet(parsed));
                   } catch {
                     setDryadNotes(["That file is not a session export."]);
                   }
@@ -579,152 +580,578 @@ export function Console() {
           </section>
         </div>
       )}
+      {pendingRole && (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 px-4" onClick={() => setPendingRole(null)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="role-switch-title"
+            className="panel w-full max-w-md p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="role-switch-title" className="text-lg font-semibold">Switch roles during the net?</h2>
+            <p className="mt-2 text-sm text-muted">
+              The net is open and you are working as {ROLES.find((r) => r.id === net.role)?.label}. Switch to {ROLES.find((r) => r.id === pendingRole)?.label} now?
+            </p>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button className="btn" type="button" onClick={() => setPendingRole(null)}>Stay as {ROLES.find((r) => r.id === net.role)?.label}</button>
+              <button className="btn btn-accent" type="button" onClick={() => { applyRole(pendingRole); setPendingRole(null); }}>Switch</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
-function Roster({ net, onCall, onClose }: { net: Net; onCall: (call: string) => void; onClose: (call: string) => void }) {
-  const rows = onAir(net);
-  if (!rows.length) return <p className="text-sm text-muted">Empty until someone authenticates or is accepted.</p>;
+function codeTip(token: string, asked = false): { code: string; text: string } | null {
+  const hit = lookupCode(token).find((c) => c.kind === "Q" || c.kind === "Z");
+  if (!hit) return null;
+  const raw = asked ? (hit.question || `Question form. ${hit.meaning}`) : hit.meaning;
+  const text = raw.length > 180 ? `${raw.slice(0, 177)}…` : raw;
+  return { code: asked ? `INT ${hit.code}` : hit.code, text };
+}
+
+function intBefore(text: string): boolean {
+  return /\bINT\s*$/i.test(text);
+}
+
+function MarkedText({ value, onChange, tall, placeholder }: { value: string; onChange: (v: string) => void; tall?: boolean; placeholder: string }) {
+  const [editing, setEditing] = useState(false);
+  const [tip, setTip] = useState<{ x: number; y: number; code: string; text: string } | null>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  const height = tall ? "h-72" : "h-16";
+  useEffect(() => {
+    if (editing) box.current?.focus();
+  }, [editing]);
+  function show(token: string, x: number, y: number, asked = false) {
+    const found = codeTip(token, asked);
+    setTip(found ? { ...found, x, y } : null);
+  }
+  const parts = value.split(/(\bQRRR\b|\b[QZ][A-Z]{2}\b)/g);
+  const showEditor = editing || !value.trim();
   return (
-    <ul className="max-h-48 overflow-auto text-sm">
-      {rows.map((s) => (
-        <li key={s.call} className="flex items-center justify-between gap-2 border-b border-line py-1">
-          <button type="button" className="mono text-left" onClick={() => onCall(s.call)}>
-            {s.method === "IP" ? `${s.call}/IP` : s.call}
-            {s.zug ? " · ZUG" : ""}
-            {net.turn === s.call ? " · called" : ""}
-          </button>
-          <button className="btn px-2" type="button" onClick={() => onClose(s.call)}>ZKJ</button>
-        </li>
-      ))}
-    </ul>
+    <div className="relative mb-2">
+      {showEditor ? (
+        <textarea
+          ref={box}
+          className={`field mono ${height}`}
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => setEditing(true)}
+          onBlur={() => { setEditing(false); setTip(null); }}
+          onMouseUp={(e) => {
+            const el = e.currentTarget;
+            const raw = el.value.slice(el.selectionStart, el.selectionEnd).trim().toUpperCase();
+            const picked = raw.match(/^(?:INT\s+)?(QRRR|[QZ][A-Z]{2})$/);
+            if (picked) show(picked[1], e.clientX, e.clientY, picked[0].startsWith("INT") || intBefore(el.value.slice(0, el.selectionStart)));
+            else setTip(null);
+          }}
+        />
+      ) : (
+        <div
+          className={`field mono ${height} cursor-text overflow-auto whitespace-pre-wrap`}
+          onClick={() => setEditing(true)}
+        >
+          {parts.map((part, i) => {
+            const asked = intBefore(parts[i - 1] ?? "");
+            const found = /^(QRRR|[QZ][A-Z]{2})$/.test(part) ? codeTip(part, asked) : null;
+            if (!found) return <span key={i}>{part}</span>;
+            return (
+              <span
+                key={i}
+                className="cursor-help text-accent underline decoration-dotted underline-offset-2"
+                onClick={(e) => e.stopPropagation()}
+                onMouseEnter={(e) => show(part, e.clientX, e.clientY, asked)}
+                onMouseLeave={() => setTip(null)}
+              >{part}</span>
+            );
+          })}
+        </div>
+      )}
+      {tip && (
+        <div
+          className="pointer-events-none fixed z-30 max-w-xs rounded-md border border-line bg-surface px-2 py-1 text-xs shadow"
+          style={{ left: Math.min(tip.x, window.innerWidth - 280), top: tip.y + 16 }}
+        >
+          <span className="mono text-accent">{tip.code}</span> {tip.text}
+        </div>
+      )}
+    </div>
   );
 }
 
-function RoleSteps({ net, rows, offer }: { net: Net; rows: Rows | null; offer: (text: string) => void }) {
-  if (net.role === "ncs") {
-    const steps = [
-      ["Open", scriptOpen(net.ncs)],
-      ["Agency", scriptAgency(net.ncs)],
-      ["Traffic", scriptTrafficCall(net.ncs)],
-      ["Check-ins", scriptCheckin(net.ncs)],
-      ["ZKS", scriptZks(net)],
-      ["Close", scriptClose(net.ncs)],
-    ];
-    return (
-      <div className="mb-3">
-        <h2 className="mb-2 text-sm font-semibold">Net control</h2>
-        <div className="flex flex-wrap gap-2">
-          {steps.map(([label, text]) => (
-            <button key={label} className="btn" type="button" onClick={() => offer(text)}>{label}</button>
-          ))}
-          <button className="btn" type="button" onClick={() => {
-            const last = [...net.zks].reverse()[0];
-            if (last) offer(scriptImi(net.ncs, last));
-          }}>IMI</button>
-        </div>
-      </div>
-    );
+function Triplet({ value, ok }: { value: string | null; ok: boolean | null }) {
+  if (!value || value.length !== 3) return null;
+  const tone = ok === true ? "text-ok" : ok === false ? "text-danger" : "text-muted";
+  return <span className={tone}> {value}</span>;
+}
+
+function ZksRoll({ net }: { net: Net }) {
+  const labels = [
+    ...onAir(net).map((s) => (s.method === "IP" ? `${s.call}/IP` : s.call)),
+    ...wl2kStations(net).map((s) => `${s.call}/WL2K`),
+    `${net.ncs ? `${net.ncs}/NCS` : ""}`,
+  ].filter(Boolean);
+  return (
+    <p className="mono mb-2 flex flex-wrap gap-x-2 gap-y-0 text-xs leading-5">
+      {labels.map((label) => (
+        <span key={label} className="whitespace-nowrap">{label}</span>
+      ))}
+    </p>
+  );
+}
+
+function RollList({
+  net, rows, setNet, offer, onCall,
+}: {
+  net: Net;
+  rows: Rows | null;
+  setNet: (n: Net) => void;
+  offer: (text: string) => void;
+  onCall: (call: string) => void;
+}) {
+  function ask(call: string) {
+    if (!rows) {
+      offer("Load today's DRYAD before INT ZNB.");
+      return;
+    }
+    const chal = challengeFrom(rows);
+    if (!chal) return;
+    setNet(requestAuth(net, call, chal));
+    offer(scriptChallenge(net.ncs, call, chal));
   }
-  if (net.role === "operator") {
-    return (
-      <div className="mb-3">
-        <h2 className="mb-2 text-sm font-semibold">General operator</h2>
-        <div className="flex flex-wrap gap-2">
-          <button className="btn btn-accent" type="button" onClick={() => {
-            if (!net.myCall.trim()) { offer("Enter your call first."); return; }
-            let group: string | null = null;
-            if (rows) {
-              const chal = challengeFrom(rows);
-              const ans = chal ? authenticate(rows, chal[0], chal[1]) : null;
-              if (chal && ans) group = `${chal}${ans}`;
-            }
-            offer(operatorCheckin(net.ncs, net.myCall, "RF", group));
-          }}>ZKE + ZNB</button>
-          <button className="btn" type="button" onClick={() => offer(net.myCall.trim() ? operatorCheckin(net.ncs, net.myCall, "RF", null) : "Enter your call first.")}>ZKE only</button>
-          <button className="btn" type="button" onClick={() => offer(net.myCall.trim() ? `${net.ncs} DE ${net.myCall} ZUG ZNB K` : "Enter your call first.")}>ZUG ZNB</button>
-          <button className="btn" type="button" onClick={() => offer(net.myCall.trim() ? operatorZev(net.ncs, net.myCall, false) : "Enter your call first.")}>ZEV</button>
-          <button className="btn" type="button" onClick={() => offer(net.myCall.trim() ? operatorZev(net.ncs, net.myCall, true) : "Enter your call first.")}>ZUG ZEV</button>
-        </div>
-      </div>
-    );
+  function place(call: string) {
+    offer(scriptJoinAck(net, call));
   }
-  if (net.role === "wl2k") {
-    return (
-      <div className="mb-3">
-        <h2 className="mb-2 text-sm font-semibold">Winlink gateway</h2>
-        <p className="mb-2 text-sm text-muted">Before the net, check OPIN@winlink.org for ZKE messages. Paste them below, acknowledge, and they join the roll as CALL/WL2K.</p>
-        <button className="btn" type="button" onClick={() => offer(gatewayMessage(net))}>Prepare gateway message</button>
-      </div>
-    );
+  function zug(call: string) {
+    const next = acceptExempt(net, call);
+    setNet(next);
+    offer(scriptJoinAck(next, call));
   }
+
+  const pending = pendingCalls(net);
+  const air = onAir(net);
+  const wl = wl2kStations(net);
+  const away = awayStations(net);
+
+  return (
+    <div className="max-h-[32rem] overflow-auto">
+      {pending.length > 0 && (
+        <>
+          <h3 className="mb-0.5 text-xs font-medium text-muted">Pending</h3>
+          <ul>
+            {pending.map((c) => {
+              const st = net.stations.find((s) => s.call === c);
+              return (
+                <li key={c} className="flex flex-wrap items-center gap-1 border-b border-line py-0.5">
+                  <span className="mono text-xs">
+                    {c}
+                    <Triplet value={st?.volunteered ?? null} ok={st?.volunteered ? (st.challenge && !st.authenticated ? false : null) : null} />
+                  </span>
+                  <button className="btn btn-xs btn-accent" type="button" onClick={() => ask(c)}>INT ZNB</button>
+                  <button className="btn btn-xs" type="button" onClick={() => zug(c)}>ZUG ZNB</button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+      <h3 className="mb-0.5 mt-1 text-xs font-medium text-muted">On air, then Winlink, then NCS</h3>
+      {air.length === 0 && wl.length === 0 && <p className="text-xs text-muted">No one on the roll yet.</p>}
+      <ul>
+        {air.map((s) => {
+          const ack = scriptJoinAck(net, s.call);
+          const placeLabel = ack.endsWith(" R") ? "R" : `ZGO ${ack.split(" ").pop()}`;
+          return (
+            <li key={s.call} className="flex flex-wrap items-center gap-1 border-b border-line py-0.5">
+              <button type="button" className="mono text-left text-xs" onClick={() => onCall(s.call)}>
+                {s.method === "IP" ? `${s.call}/IP` : s.call}
+                <Triplet value={s.volunteered} ok={s.volunteered ? s.authenticated : null} />
+                {s.zug ? <span className="text-muted"> ZUG</span> : ""}
+                {s.qsyChannel ? <span className="text-muted"> {s.qsyChannel}</span> : ""}
+                {net.turn === s.call ? <span className="text-accent"> called</span> : ""}
+              </button>
+              {(s.authenticated || s.zug) && (
+                <button className="btn btn-xs btn-accent" type="button" onClick={() => place(s.call)}>{placeLabel}</button>
+              )}
+              <button className="btn btn-xs" type="button" onClick={() => ask(s.call)}>INT ZNB</button>
+              {s.qsyChannel && (
+                <button className="btn btn-xs" type="button" onClick={() => { setNet(setQsy(net, s.call, null)); offer(scriptReturn(net.ncs, s.call)); }}>Back</button>
+              )}
+              <button className="btn btn-xs" type="button" onClick={() => offer(scriptCloseOne(net.ncs, s.call))}>ZKJ</button>
+            </li>
+          );
+        })}
+        {wl.map((s) => (
+          <li key={s.call} className="flex flex-wrap items-center gap-1 border-b border-line py-0.5">
+            <span className="mono text-xs">{s.call}/WL2K</span>
+            <button className="btn btn-xs" type="button" onClick={() => offer(scriptCloseOne(net.ncs, s.call))}>ZKJ</button>
+          </li>
+        ))}
+        {net.ncs ? (
+          <li className="flex items-center gap-1 py-0.5">
+            <span className="mono text-xs">{net.ncs}/NCS<Triplet value={net.ncsTriplet} ok={net.ncsTripletOk} /></span>
+          </li>
+        ) : (
+          <li className="py-0.5 text-xs text-muted">NCS not heard yet.</li>
+        )}
+      </ul>
+      {away.length > 0 && (
+        <p className="mt-1 text-xs text-muted">Out: {away.map((s) => `${s.call} ${s.qsyChannel}`).join(", ")}</p>
+      )}
+    </div>
+  );
+}
+
+function ProofBanner({ net }: { net: Net }) {
+  if (net.ncsProof === "unknown" && !net.ncsProofNote) return null;
+  const tone = net.ncsProof === "good" ? "text-ok" : net.ncsProof === "unknown" ? "text-accent" : "text-danger";
+  return (
+    <p className={`mb-3 rounded-md border border-line px-3 py-2 text-sm ${tone}`}>
+      {net.ncsProofNote || "Net control has not authenticated yet."}
+    </p>
+  );
+}
+
+function LineButtons({ title, hint, items }: { title: string; hint: string; items: { label: string; run: () => void; title?: string }[] }) {
   return (
     <div className="mb-3">
-      <h2 className="mb-2 text-sm font-semibold">IP station</h2>
-      <div className="flex flex-wrap gap-2">
-        <button className="btn btn-accent" type="button" onClick={() => offer(net.myCall.trim() ? operatorCheckin(net.ncs, net.myCall, "IP", null) : "Enter your call first.")}>Check in as IP</button>
-        <button className="btn" type="button" onClick={() => offer(net.myCall.trim() ? operatorZev(net.ncs, net.myCall, false) : "Enter your call first.")}>ZEV</button>
+      <h2 className="mb-1 text-sm font-semibold">{title}</h2>
+      <p className="mb-2 text-sm text-muted">{hint}</p>
+      <div className="flex flex-wrap gap-1">
+        {items.map((item) => (
+          <button key={item.label} className="btn btn-xs" type="button" title={item.title} onClick={item.run}>{item.label}</button>
+        ))}
       </div>
     </div>
   );
 }
 
-function TrafficList({
-  net, setNet, offer, qsyPick,
-}: {
-  net: Net;
-  setNet: (n: Net) => void;
-  offer: (text: string) => void;
-  qsyPick: string;
-}) {
-  if (!net.traffic.length) {
-    return <p className="text-sm text-muted">No open ZBO. A listing leaves this list after ZOF and a ZEV or ZUG ZEV from every station on the roll.</p>;
+function RoleSteps({ net, rows, canOpen, offer, blockOpen }: { net: Net; rows: Rows | null; canOpen: boolean; offer: (text: string) => void; blockOpen: (note: string) => void }) {
+  const asNcs = net.role === "ncs";
+  const leave = () => {
+    if (!asNcs && !callReady()) return;
+    offer(scriptDrop(net.ncs, net.myCall, asNcs));
+  };
+  const trouble = () => {
+    if (!asNcs && !callReady()) return;
+    offer(scriptEquipment(net.ncs, net.myCall, asNcs));
+  };
+  const own = [
+    { label: "ZKJ", title: "I am closing down", run: leave },
+    { label: "ZCJ", title: "Equipment trouble", run: trouble },
+  ];
+  const callReady = () => {
+    if (!net.myCall.trim()) {
+      offer("Enter your call first.");
+      return false;
+    }
+    if (!net.ncs.trim()) {
+      offer("NCS is blank until an authenticated ZKA is read, or you type that call.");
+      return false;
+    }
+    return true;
+  };
+  if (net.role === "ncs") {
+    return (
+      <LineButtons
+        key="ncs"
+        title="Net control"
+        hint="Open sends ZKA with a DRYAD triplet. Stations check those three letters before they treat you as net control."
+        items={[
+          { label: "Open", run: () => {
+            const line = canOpen ? scriptOpen(net.ncs, rows) : null;
+            if (!line) {
+              blockOpen(rows
+                ? "The training sheet is not today's DRYAD. Load the real page before you open, or stations will reject the triplet."
+                : "No DRYAD is loaded for that day. Do not open until the line can carry a ZNB triplet.");
+              return;
+            }
+            offer(line);
+          } },
+          { label: "Agency", run: () => offer(scriptAgency(net.ncs)) },
+          { label: "Traffic", run: () => offer(scriptTrafficCall(net.ncs)) },
+          { label: "Check-ins", run: () => offer(scriptCheckin(net.ncs)) },
+          { label: "ZKS", run: () => offer(scriptZks(net)) },
+          { label: "Close", run: () => offer(scriptClose(net.ncs)) },
+          { label: "IMI", run: () => {
+            const last = [...net.zks].reverse()[0];
+            if (last) offer(scriptImi(net.ncs, last));
+          } },
+          ...own,
+        ]}
+      />
+    );
+  }
+  if (net.role === "operator") {
+    const group = () => {
+      if (!rows) return null;
+      const chal = challengeFrom(rows);
+      const ans = chal ? authenticate(rows, chal[0], chal[1]) : null;
+      return chal && ans ? `${chal}${ans}` : null;
+    };
+    return (
+      <LineButtons
+        key="operator"
+        title="Operator"
+        hint={net.ncsProof === "unknown"
+          ? "Wait for net control to open with ZKA ZNB and three letters. Paste that line and Read it before you follow."
+          : "Check in, then stay silent until net control calls you."}
+        items={[
+          { label: "ZKE + ZNB", run: () => { if (callReady()) offer(operatorCheckin(net.ncs, net.myCall, "RF", group())); } },
+          { label: "ZKE only", run: () => { if (callReady()) offer(operatorCheckin(net.ncs, net.myCall, "RF", null)); } },
+          { label: "ZUG ZNB", run: () => { if (callReady()) offer(`${net.ncs} DE ${net.myCall} ZUG ZNB K`); } },
+          { label: "ZEV", run: () => { if (callReady()) offer(operatorZev(net.ncs, net.myCall, false)); } },
+          { label: "ZUG ZEV", run: () => { if (callReady()) offer(operatorZev(net.ncs, net.myCall, true)); } },
+          ...own,
+        ]}
+      />
+    );
+  }
+  if (net.role === "wl2k") {
+    return (
+      <LineButtons
+        key="wl2k"
+        title="Winlink"
+        hint="Before the net, check OPIN@winlink.org for ZKE messages. Paste them below, acknowledge, and they join the roll as CALL/WL2K."
+        items={[
+          { label: "Gateway message", run: () => offer(gatewayMessage(net)) },
+          ...own,
+        ]}
+      />
+    );
   }
   return (
-    <ul className="max-h-80 space-y-3 overflow-auto">
-      {net.traffic.map((t) => (
-        <TrafficCard key={t.id} net={net} item={t} setNet={setNet} offer={offer} qsyPick={qsyPick} />
-      ))}
-    </ul>
+    <LineButtons
+      key="ip"
+      title="IP"
+      hint="Check in as CALL/IP. List a file with ZBO when net control calls for traffic."
+      items={[
+        { label: "Check in as IP", run: () => { if (callReady()) offer(operatorCheckin(net.ncs, net.myCall, "IP", null)); } },
+        { label: "ZEV", run: () => { if (callReady()) offer(operatorZev(net.ncs, net.myCall, false)); } },
+        ...own,
+      ]}
+    />
   );
 }
 
-function TrafficCard({
-  net, item, setNet, offer, qsyPick,
-}: {
-  net: Net;
-  item: Traffic;
-  setNet: (n: Net) => void;
-  offer: (text: string) => void;
-  qsyPick: string;
-}) {
-  const waiting = unanswered(net, item);
+function TrafficPanel({ net, setNet, offer }: { net: Net; setNet: (n: Net) => void; offer: (text: string) => void }) {
+  const [from, setFrom] = useState(() => (net.myCall || net.ncs).toUpperCase());
+  const [qty, setQty] = useState("1");
+  const [prec, setPrec] = useState("R");
+  const [dest, setDest] = useState("");
+  const [qsyFor, setQsyFor] = useState<string | null>(null);
+  const [partner, setPartner] = useState("");
+  const [qsyChannel, setQsyChannel] = useState("80F3");
+  const [qsyQty, setQsyQty] = useState("1");
+  const [qsyName, setQsyName] = useState("");
+  const ipChoices = net.stations.filter((s) => s.method === "IP" && net.zks.includes(s.call) && s.call !== qsyFor);
+  const knownFiles = [...new Set(
+    net.transfers
+      .filter((item) => item.originator === qsyFor && item.file && item.file !== "Unassigned")
+      .map((item) => item.file.replace(/\.[^.]+$/, "")),
+  )];
+  function openQsy(call: string) {
+    const choices = net.stations.filter((s) => s.method === "IP" && net.zks.includes(s.call) && s.call !== call);
+    setQsyFor(call);
+    setPartner(choices.length === 1 ? choices[0].call : "");
+    const sameBand = CHANNELS.filter((c) => c !== net.channel && c.slice(0, 2) === net.channel.slice(0, 2));
+    setQsyChannel(sameBand[0] ?? CHANNELS.find((c) => c !== net.channel) ?? "80F3");
+    setQsyQty("1");
+    setQsyName("");
+  }
+  function sendQsy() {
+    if (!qsyFor || !partner || !qsyName.trim() || !Number(qsyQty)) return;
+    const line = scriptQsyZof(net.ncs, qsyFor, partner, qsyChannel, Number(qsyQty), qsyName);
+    setNet(directQsy(net, qsyFor, partner, qsyChannel, Number(qsyQty), qsyName));
+    offer(line);
+    setQsyFor(null);
+  }
+  function prepare() {
+    if (!net.outbound.length) return;
+    offer(outboundScript(net.ncs, net.outbound));
+  }
   return (
-    <li className="border-b border-line pb-2">
-      <p className="mono text-sm">{item.originator} ZBO {item.quantity} {item.precedence} {item.destination}</p>
-      <p className="text-sm text-muted">
-        {item.file ?? "no file"} · {item.zof ? "directed" : "listed"} · {item.via}
-        {item.blocks ? ` · ${item.blocks} blocks` : ""}
-      </p>
-      <p className="text-sm">Waiting {waiting.join(" ") || "none"}</p>
-      {Object.entries(item.missingBy).map(([call, blocks]) => (
-        <p key={call} className="text-sm text-danger"> {call} missing {blocks.join(" ")}</p>
-      ))}
-      {net.role === "ncs" && (
-        <div className="mt-1 flex flex-wrap gap-2">
-          <button className="btn" type="button" onClick={() => { setNet(directTraffic(net, item.id, item.originator)); offer(scriptZof(net.ncs, item.originator, item)); }}>ZOF</button>
-          <button className="btn" type="button" onClick={() => { setNet(setQsy(directTraffic(net, item.id, item.originator), item.originator, qsyPick)); offer(`${item.originator} DE ${net.ncs} QSY ${qsyPick} ZOF ${item.quantity} ${item.precedence} ${item.destination}${item.file ? ` ${item.file}` : ""} K`); }}>QSY + ZOF</button>
-          <button className="btn" type="button" onClick={() => setNet(setVia(net, item.id, "wl2k"))}>Via Winlink</button>
-          <button className="btn" type="button" onClick={() => setNet(markComplete(net, item.id))}>Follow-up</button>
+    <div>
+      <h2 className="mb-1 text-sm font-semibold">Traffic</h2>
+      <p className="mb-2 text-xs text-muted">Each row is one station's traffic. When their file starts, that count drops by one and the file is tracked below.</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="w-[calc(10ch+1.5rem)] shrink-0 text-xs text-muted">From
+          <input className="field mono mt-1 uppercase" maxLength={10} value={from} onChange={(e) => setFrom(e.target.value.toUpperCase().slice(0, 10))} placeholder="CALL" />
+        </label>
+        <label className="w-[calc(2ch+1.35rem)] shrink-0 text-xs text-muted">Qty
+          <input className="field mt-1 px-1 text-center" inputMode="numeric" maxLength={2} value={qty} onChange={(e) => setQty(e.target.value.replace(/\D/g, "").slice(0, 2))} />
+        </label>
+        <label className="w-14 shrink-0 text-xs text-muted">Prec
+          <select className="field mt-1 px-1" value={prec} onChange={(e) => setPrec(e.target.value)}>
+            {PRECEDENCE.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </label>
+        <label className="w-1/2 text-xs text-muted">To
+          <input className="field mono mt-1 uppercase" list="groups" value={dest} onChange={(e) => setDest(e.target.value.toUpperCase())} placeholder="OH or GREE WILM" />
+        </label>
+      </div>
+      <datalist id="groups">{GROUPS.map((g) => <option key={g} value={g} />)}</datalist>
+      <button className="btn mt-2" type="button" onClick={() => { setNet(addOutbound(net, from, Number(qty), prec, dest)); setDest(""); }}>Add</button>
+      {net.outbound.length > 0 && (
+        <ul className="mt-2">
+          {net.outbound.map((piece, i) => (
+            <li key={`${piece.sender}-${piece.quantity}-${piece.precedence}-${piece.destinations.join("-")}-${i}`} className="flex items-center justify-between gap-2 border-b border-line py-1">
+              <span className="mono text-xs">{piece.sender} {piece.quantity} {piece.precedence} {piece.destinations.join(" ")}</span>
+              <button className="btn btn-xs" type="button" onClick={() => setNet(removeOutbound(net, i))}>Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button className="btn btn-accent" type="button" onClick={prepare} disabled={!net.outbound.length}>Prepare ZBO</button>
+        {net.role === "ncs" && (
+          <button className="btn" type="button" disabled={!net.outbound.length} onClick={() => { setNet(listOnNet(net)); offer(outboundScript(net.ncs, net.outbound)); }}>On the ZBO list</button>
+        )}
+      </div>
+
+      {net.role === "ncs" && net.offers.length > 0 && (
+        <div className="mt-4">
+          <h3 className="mb-1 text-sm font-medium">Heard — not listed</h3>
+          <p className="mb-1 text-xs text-muted">R acknowledges it and puts it on the ZBO list.</p>
+          <ul>
+            {net.offers.map((item) => (
+              <li key={item.id} className="flex flex-wrap items-center gap-1 border-b border-line py-1">
+                <span className="mono text-xs">{item.from} {pieceText(item.pieces)}</span>
+                <button className="btn btn-xs btn-accent" type="button" onClick={() => { setNet(acknowledgeOffer(net, item.id)); offer(scriptAckZbo(net.ncs, item.from, item.pieces)); }}>R</button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
-      <div className="mt-1 flex flex-wrap gap-2">
-        {net.zks.slice(0, 4).map((c) => (
-          <button key={c} className="btn px-2" type="button" onClick={() => setNet(recordManualZev(net, item.id, c, "zev", []))}>{c} ZEV</button>
+
+      <h3 className="mb-1 mt-4 text-sm font-medium">ZBO list</h3>
+      {net.traffic.length === 0 && <p className="text-xs text-muted">Nothing listed yet. A station stays off this list until net control says R. Net control's own listing goes on immediately.</p>}
+      <ul>
+        {net.traffic.map((item) => (
+          <li key={item.id} className="flex flex-wrap items-center gap-1 border-b border-line py-1">
+            <span className="mono text-xs">{item.originator} {pieceText(item.pieces)}</span>
+            {net.role === "ncs" && (
+              <>
+                <button className="btn btn-xs" type="button" onClick={() => { setNet(setTurn(net, item.originator)); offer(scriptZof(net.ncs, item.originator, item)); }}>ZOF</button>
+                <button className="btn btn-xs" type="button" onClick={() => openQsy(item.originator)}>QSY</button>
+              </>
+            )}
+          </li>
         ))}
-      </div>
-    </li>
+      </ul>
+
+      {(net.qsos ?? []).length > 0 && (
+        <div className="mt-4">
+          <h3 className="mb-1 text-sm font-medium">QSY</h3>
+          <ul>
+            {(net.qsos ?? []).map((job) => (
+              <li key={job.id} className="border-b border-line py-1">
+                <p className="mono text-xs">{job.from} {job.with} QSY {job.channel} ZOF {job.quantity} {job.name}</p>
+                <p className="mt-0.5 text-xs">
+                  <span className={job.fromAck ? "text-ok" : "text-muted"}>{job.from} {job.fromAck ? "R" : "waiting"}</span>
+                  <span className="text-muted"> · </span>
+                  <span className={job.withAck ? "text-ok" : "text-muted"}>{job.with} {job.withAck ? "R" : "waiting"}</span>
+                </p>
+                <button className="btn btn-xs mt-1" type="button" onClick={() => setNet(dismissQsy(net, job.id))}>Clear</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <h3 className="mb-1 mt-4 text-sm font-medium">Files</h3>
+      {net.transfers.length === 0 && <p className="text-xs text-muted">No file on the air. Paste the FLAMP header and the station reports.</p>}
+      {net.transfers.map((item) => (
+        <div key={item.id} className="mb-3 border-b border-line pb-2">
+          <p className="mono text-xs">
+            {item.originator ? <span>{item.originator} </span> : null}
+            {item.file}
+            {item.listing ? <span className="text-muted"> {item.listing}</span> : null}
+            {item.hash ? <span className="text-accent"> {`{${item.hash}}`}</span> : null}
+            {item.blocks ? <span className="text-muted"> {item.blocks} blk</span> : null}
+          </p>
+          <ul className="mt-1">
+            {transferRoster(net, item)
+              .filter((row) => (net.role !== "ncs" && net.role !== "wl2k") || !fileViaWl2k(net, item).includes(row.call))
+              .map((row) => (
+              <li key={row.call} className="flex flex-wrap items-center gap-1 py-0.5">
+                <span className="mono text-xs">{row.call}</span>
+                {!row.report && <span className="text-xs text-muted">not heard</span>}
+                {row.report?.status === "have" && <span className="text-xs text-ok">ZEV</span>}
+                {row.report?.status === "none" && <span className="text-xs text-danger">ZUG ZEV</span>}
+                {row.report?.preamble && <span className="text-xs text-danger">missing preamble</span>}
+                {row.report?.status === "miss" && !row.report.preamble && (
+                  <span className="text-xs text-danger">missing {row.report.missing.join(" ")}</span>
+                )}
+                {row.report?.status !== "have" && (
+                  <button className="btn btn-xs btn-accent" type="button" onClick={() => offer(scriptIntZev(net.ncs || net.myCall, row.call, item.hash || item.file || "FILE"))}>INT ZEV</button>
+                )}
+                {(net.role === "ncs" || net.role === "wl2k") && row.report?.status !== "have" && (
+                  <button className="btn btn-xs" type="button" onClick={() => setNet(sendViaWl2k(net, item.id, row.call))}>To WL2K</button>
+                )}
+              </li>
+            ))}
+          </ul>
+          {(net.role === "ncs" || net.role === "wl2k") && fileViaWl2k(net, item).length > 0 && (
+            <p className="mt-1 flex flex-wrap items-center gap-1 text-xs">
+              <span className="mono">{fileViaWl2k(net, item).join(" ")}</span>
+              <span className="text-muted">ZOF ZOK WL2K</span>
+              {fileViaWl2k(net, item).filter((call) => (item.viaWl2k ?? []).includes(call)).map((call) => (
+                <button key={call} className="btn btn-xs" type="button" onClick={() => setNet(recallFromWl2k(net, item.id, call))}>Return {call}</button>
+              ))}
+            </p>
+          )}
+          <button className="btn btn-xs mt-1" type="button" onClick={() => setNet(dismissTransfer(net, item.id))}>Clear</button>
+        </div>
+      ))}
+      {qsyFor && (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 px-4" onClick={() => setQsyFor(null)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="qsy-title" className="panel w-full max-w-md p-4" onClick={(e) => e.stopPropagation()}>
+            <h2 id="qsy-title" className="text-lg font-semibold">QSY {qsyFor}</h2>
+            <p className="mt-1 text-sm text-muted">Pick the IP station and the channel. Both have to roger before they leave this frequency.</p>
+            <fieldset className="mt-3">
+              <legend className="text-xs text-muted">With</legend>
+              {ipChoices.length === 0 && <p className="mt-1 text-sm text-muted">No IP station is on the roll. Check one in as CALL ZKE IP, or add them as IP.</p>}
+              <div className="mt-1 flex flex-col gap-1">
+                {ipChoices.map((s) => (
+                  <label key={s.call} className="flex min-h-11 items-center gap-2 text-sm">
+                    <input type="radio" name="qsy-ip" checked={partner === s.call} onChange={() => setPartner(s.call)} />
+                    <span className="mono">{s.call}/IP</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="mt-3 grid grid-cols-[7rem_4rem_1fr] gap-2">
+              <label className="text-xs text-muted">Channel
+                <select className="field mt-1" value={qsyChannel} onChange={(e) => setQsyChannel(e.target.value)}>
+                  {CHANNELS.filter((c) => c !== net.channel).map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </label>
+              <label className="text-xs text-muted">Qty
+                <input className="field mt-1" inputMode="numeric" value={qsyQty} onChange={(e) => setQsyQty(e.target.value.replace(/\D/g, ""))} />
+              </label>
+              <label className="text-xs text-muted">File
+                <input className="field mono mt-1 uppercase" value={qsyName} onChange={(e) => setQsyName(e.target.value.toUpperCase())} placeholder="FIELDSITREP" />
+              </label>
+            </div>
+            {knownFiles.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {knownFiles.map((name) => (
+                  <button key={name} className="btn btn-xs" type="button" onClick={() => setQsyName(name)}>{name}</button>
+                ))}
+              </div>
+            )}
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button className="btn" type="button" onClick={() => setQsyFor(null)}>Cancel</button>
+              <button className="btn btn-accent" type="button" disabled={!partner || !qsyName.trim() || !Number(qsyQty)} onClick={sendQsy}>Prepare</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -798,7 +1225,7 @@ function IpBox({
                   <select className="field w-28" value={f.folder} onChange={(e) => setNet(moveFile(net, f.id, e.target.value))}>
                     {FOLDERS.map((folderName) => <option key={folderName}>{folderName}</option>)}
                   </select>
-                  <button className="btn" type="button" onClick={() => { const r = listFile(net, f.id); setNet(r.net); offer(r.suggestion); setPrec(f.precedence); setDest(f.destination); }}>List ZBO</button>
+                  <button className="btn" type="button" onClick={() => { const r = listFile(net, f.id); setNet(r.net); offer(r.suggestion); setPrec(f.precedence); setDest(f.destination); }}>Prepare ZBO</button>
                 </li>
               ))}
             </ul>

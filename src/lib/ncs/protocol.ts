@@ -1,7 +1,9 @@
-import { authenticate, challengeFrom, type Rows } from "./dryad";
+import { authenticate, challengeFrom, tripletValid, volunteerTriplet, type Rows } from "./dryad";
 
 export type Role = "ncs" | "wl2k" | "ip" | "operator";
 export type Method = "RF" | "WL2K" | "IP";
+/** Whether the station that sent ZKA proved it with today's DRYAD. */
+export type NcsProof = "unknown" | "good" | "bad" | "none" | "other";
 
 export type Station = {
   call: string;
@@ -15,21 +17,53 @@ export type Station = {
   qsyChannel: string | null;
   qsySince: string | null;
   agency: string;
+  /** Left the frequency (ZKJ) or has equipment trouble (ZCJ). Remaining files go by Winlink. */
+  relay: boolean;
+  /** Asked INT ZKJ and is waiting for net control to allow it. */
+  closeAsk: boolean;
+  /** Stations that were ahead of this one on the roll when ZCJ took them off. */
+  zksAhead: string[] | null;
 };
+
+export type Piece = {
+  quantity: number;
+  precedence: string;
+  destinations: string[];
+};
+
+export type OutboundItem = Piece & { sender: string };
 
 export type Traffic = {
   id: number;
   originator: string;
-  quantity: number;
-  precedence: string;
-  destination: string;
-  file: string | null;
+  pieces: Piece[];
+};
+
+export type Offer = {
+  id: number;
+  from: string;
+  pieces: Piece[];
+};
+
+export type FileReport = {
+  status: "have" | "miss" | "none";
+  missing: number[];
+  preamble: boolean;
+};
+
+export type Transfer = {
+  id: number;
+  hash: string;
+  file: string;
+  originator: string | null;
   blocks: number | null;
-  received: string[];
-  refused: string[];
-  missingBy: Record<string, number[]>;
-  zof: boolean;
-  via: "air" | "wl2k" | "undecided";
+  /** Set once, when this file takes one message off the sender's ZBO list. */
+  counted: boolean;
+  /** Precedence and destinations of the message this file took, such as R US. */
+  listing: string | null;
+  reports: Record<string, FileReport>;
+  /** Stations moved by hand onto the Winlink send line for this file. */
+  viaWl2k: string[];
 };
 
 export type LogLine = { time: string; source: string; message: string };
@@ -51,6 +85,19 @@ export type FolderFile = {
   listed: boolean;
 };
 
+export type QsyJob = {
+  id: number;
+  /** Station that has the traffic. */
+  from: string;
+  /** IP station they are sent to work with. */
+  with: string;
+  channel: string;
+  quantity: number;
+  name: string;
+  fromAck: boolean;
+  withAck: boolean;
+};
+
 export type Net = {
   ncs: string;
   myCall: string;
@@ -61,14 +108,26 @@ export type Net = {
   turn: string | null;
   stations: Station[];
   zks: string[];
+  /** Listings this desk still wants to send. Not on the net until NCS acknowledges. */
+  outbound: OutboundItem[];
+  /** Heard ZBO that net control has not acknowledged. */
+  offers: Offer[];
   traffic: Traffic[];
   done: Traffic[];
+  /** Files actually on the air, keyed by the FLAMP hash. */
+  transfers: Transfer[];
   log: LogLine[];
   lastTx: string;
   nextId: number;
   inbox: InboxItem[];
   files: FolderFile[];
+  /** Off-frequency passes waiting on a roger from both stations. */
+  qsos: QsyJob[];
   started: string;
+  ncsProof: NcsProof;
+  ncsProofNote: string;
+  ncsTriplet: string | null;
+  ncsTripletOk: boolean | null;
 };
 
 export const CHANNELS = [
@@ -78,6 +137,24 @@ export const CHANNELS = [
   "75P", "75S", "75T", "40P", "40S", "40T",
 ];
 
+/** 80F3 is 80 meters, 40P is 40 meters. */
+export function bandForChannel(channel: string): string {
+  const meters = channel.toUpperCase().match(/^(\d+)/)?.[1];
+  return meters ? `${meters}m` : "";
+}
+
+/** The whole net changed frequency. Stations sent off on their own QSY stay where they are. */
+export function moveNetChannel(net: Net, channel: string, source = "SYSTEM"): Net {
+  const next = channel.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!next || next === net.channel) return net;
+  const band = bandForChannel(next) || net.band;
+  return log(
+    { ...net, channel: next, band },
+    `Net moved from ${net.channel} ${net.band} to ${next} ${band}`,
+    source,
+  );
+}
+
 export const GROUPS = ["OPIN", "US", "OH", "OHCE", "ALL"];
 export const FOLDERS = ["Incoming", "Ready", "Sent", "Archive"];
 export const PRECEDENCE = ["Z", "O", "P", "R"] as const;
@@ -85,7 +162,7 @@ export const PRECEDENCE = ["Z", "O", "P", "R"] as const;
 const CALL = /^[A-Z]{1,2}\d[A-Z]{1,4}$/;
 const STOP = new Set([
   "K", "AR", "AS", "QRU", "ZNB", "ZKE", "ZUG", "ZEV", "ZOF", "ZOK", "ZKA", "ZKB",
-  "ZKJ", "ZKS", "INT", "IMI", "QSY", "R", "IP", "WL2K", "BACK",
+  "ZKJ", "ZKS", "ZGO", "INT", "IMI", "QSY", "R", "IP", "WL2K", "BACK",
 ]);
 
 export function emptyNet(ncs = "N8TAG"): Net {
@@ -99,15 +176,59 @@ export function emptyNet(ncs = "N8TAG"): Net {
     turn: null,
     stations: [],
     zks: [],
+    outbound: [],
+    offers: [],
     traffic: [],
     done: [],
+    transfers: [],
     log: [],
     lastTx: "",
     nextId: 1,
     inbox: [],
     files: [],
+    qsos: [],
     started: new Date().toISOString(),
+    ncsProof: "unknown",
+    ncsProofNote: "",
+    ncsTriplet: null,
+    ncsTripletOk: null,
   };
+}
+
+function asPieces(item: Partial<Traffic> & { quantity?: number; precedence?: string; destination?: string }): Traffic {
+  if (item.pieces?.length) {
+    return { id: item.id ?? 0, originator: item.originator ?? "", pieces: item.pieces };
+  }
+  if (item.quantity) {
+    return {
+      id: item.id ?? 0,
+      originator: item.originator ?? "",
+      pieces: [{ quantity: item.quantity, precedence: item.precedence ?? "R", destinations: [item.destination ?? "OPIN"] }],
+    };
+  }
+  return { id: item.id ?? 0, originator: item.originator ?? "", pieces: [] };
+}
+
+/** Old sessions stored one destination and a file name on each ZBO. Fold those into pieces. */
+export function normalizeNet(raw: Partial<Net> | null | undefined): Net {
+  const base = { ...emptyNet(), ...(raw ?? {}) };
+  base.outbound = Array.isArray(raw?.outbound)
+    ? raw.outbound.map((item) => ({
+        sender: item.sender || "",
+        quantity: item.quantity,
+        precedence: item.precedence,
+        destinations: item.destinations ?? [],
+      }))
+    : [];
+  base.offers = Array.isArray(raw?.offers) ? raw.offers : [];
+  base.transfers = Array.isArray(raw?.transfers)
+    ? raw.transfers.map((item) => ({ ...item, counted: item.counted ?? true, listing: item.listing ?? null, reports: item.reports ?? {}, viaWl2k: item.viaWl2k ?? [] }))
+    : [];
+  base.traffic = Array.isArray(raw?.traffic) ? raw.traffic.map((item) => asPieces(item)) : [];
+  base.done = Array.isArray(raw?.done) ? raw.done.map((item) => asPieces(item as Partial<Traffic> & { quantity?: number })) : [];
+  base.qsos = Array.isArray(raw?.qsos) ? raw.qsos : [];
+  base.stations = (base.stations ?? []).map((s) => ({ ...s, relay: s.relay ?? false, closeAsk: s.closeAsk ?? false, zksAhead: s.zksAhead ?? null }));
+  return base;
 }
 
 function stamp(): string {
@@ -127,12 +248,25 @@ export function extractSpeaker(line: string): string | null {
   return token;
 }
 
+function addressedToNet(text: string): boolean {
+  if (!text.includes(" DE ")) return false;
+  const head = text.split(" DE ")[0];
+  return /\b(OPIN|ALL|NET)\b/.test(head) && calledStations(text).length === 0;
+}
+
 function calledStation(line: string): string | null {
+  return calledStations(line).at(-1) ?? null;
+}
+
+function calledStations(line: string): string[] {
   const text = line.toUpperCase().trim().replace(/\s+/g, " ");
-  if (!text.includes(" DE ")) return null;
-  const token = text.split(" DE ")[0]?.trim().split(" ").pop()?.split("/")[0]?.replace(/[.,:;<>]/g, "");
-  if (!token || !CALL.test(token)) return null;
-  return token;
+  if (!text.includes(" DE ")) return [];
+  return text
+    .split(" DE ")[0]
+    .trim()
+    .split(" ")
+    .map((token) => token.split("/")[0].replace(/[.,:;<>]/g, ""))
+    .filter((token) => CALL.test(token));
 }
 
 function znbGroup(line: string): string | null {
@@ -144,42 +278,143 @@ function znbGroup(line: string): string | null {
   return null;
 }
 
+const PREC = new Set(["R", "P", "O", "Z", "Y", "M", "C"]);
+
+function cleanToken(token: string): string {
+  return token.replace(/[.,<>]/g, "");
+}
+
+/** FLAMP hash is the 4 hex digits in {HASH}. Data blocks use {HASH:n} and are not the file id. */
+function hashOf(line: string): string | null {
+  const m = line.match(/\{([0-9A-F]{4})\}/);
+  return m ? m[1] : null;
+}
+
 function filenameOf(line: string): string | null {
+  const amp = line.match(/\{[0-9A-F]{4}\}(?:\d{14}:)?([A-Z0-9_.-]+\.[A-Z0-9]+)/);
+  if (amp) return amp[1];
   if (line.includes("FILE :")) {
-    return line.split("FILE :")[1]?.trim().split(/\s+/)[0]?.replace(/[<>]/g, "") ?? null;
+    const name = line.split("FILE :")[1]?.trim().split(/\s+/)[0]?.replace(/[<>]/g, "");
+    if (name && !/^\d+$/.test(name)) return name;
   }
   if (line.includes("FILE:")) {
-    return line.split("FILE:")[1]?.trim().split(/\s+/)[0]?.replace(/[<>]/g, "") ?? null;
+    const name = line.split("FILE:")[1]?.trim().split(/\s+/)[0]?.replace(/[<>]/g, "");
+    if (name && !/^\d+$/.test(name) && !name.startsWith("<")) return name;
   }
-  for (const token of line.replace(/[<>]/g, " ").split(" ")) {
+  for (const token of line.replace(/[<>{}]/g, " ").split(" ")) {
     if (/\.(TXT|K2S|CSV|HTML|PDF)$/.test(token)) return token;
   }
   return null;
 }
 
-function parseZbo(line: string): [number, string, string] | null {
-  const tokens = line.replace("ZBO1", "ZBO 1").split(" ");
-  const i = tokens.indexOf("ZBO");
-  if (i < 0) return null;
-  let rest = tokens.slice(i + 1);
-  let qty = 1;
-  if (rest[0] && /^\d+$/.test(rest[0])) {
-    qty = Number(rest[0]);
-    rest = rest.slice(1);
+function idCall(line: string): string | null {
+  if (!line.includes("<ID")) return null;
+  const m = line.match(/\{[0-9A-F]{4}\}([A-Z0-9]+)/);
+  if (!m || !CALL.test(m[1])) return null;
+  return m[1];
+}
+
+function sizeBlocks(line: string): number | null {
+  const amp = line.match(/<SIZE\b[^>]*>\{[0-9A-F]{4}\}(\d+)\s+(\d+)/);
+  if (amp) return Number(amp[2]);
+  const n = line.match(/\b(?:NBLK|BLKS|BLOCKS)\s*:?\s*(\d+)/);
+  return n ? Number(n[1]) : null;
+}
+
+export function pieceText(pieces: Piece[]): string {
+  return pieces.map((p) => `${p.quantity} ${p.precedence} ${p.destinations.join(" ")}`).join(" ");
+}
+
+/** One ZBO can carry several qty / precedence / destination groups. AND is only a separator. */
+export function parseZboPieces(line: string): Piece[] | null {
+  const tokens = line.replace("ZBO1", "ZBO 1").split(" ").filter(Boolean);
+  const start = tokens.indexOf("ZBO");
+  if (start < 0) return null;
+  const pieces: Piece[] = [];
+  let i = start + 1;
+  while (i < tokens.length) {
+    const token = cleanToken(tokens[i]);
+    if (!token || token === "AND" || token === "ZBO") {
+      i++;
+      continue;
+    }
+    if (STOP.has(token) || token.startsWith("<")) break;
+    if (!/^\d+$/.test(token)) break;
+    const quantity = Number(token);
+    i++;
+    let precedence = "R";
+    const prec = cleanToken(tokens[i] ?? "");
+    if (prec && PREC.has(prec)) {
+      precedence = prec;
+      i++;
+    }
+    const destinations: string[] = [];
+    while (i < tokens.length) {
+      const dest = cleanToken(tokens[i]);
+      if (!dest || dest === "AND" || dest === "ZBO") break;
+      if (/^\d+$/.test(dest) || STOP.has(dest) || dest.startsWith("<")) break;
+      destinations.push(dest);
+      i++;
+    }
+    pieces.push({ quantity, precedence, destinations: destinations.length ? destinations : ["OPIN"] });
   }
-  let prec = "R";
-  if (rest[0] && ["R", "P", "O", "Z", "Y", "M", "C"].includes(rest[0])) {
-    prec = rest[0];
-    rest = rest.slice(1);
+  return pieces.length ? pieces : null;
+}
+
+function hasRoger(text: string): boolean {
+  const tokens = text.split(" ");
+  const zbo = tokens.indexOf("ZBO");
+  const head = zbo < 0 ? tokens : tokens.slice(0, zbo);
+  return head.some((token, i) => token === "R" && (i === 0 || !/^\d+$/.test(head[i - 1])));
+}
+
+function flampReport(line: string): FileReport & { hash: string | null } | null {
+  const amp = line.match(/<MISSING\b[^>]*>\{([0-9A-F]{4})\}(.*)$/);
+  if (amp) {
+    const data = amp[2].trim();
+    if (data.includes("CONFIRMED")) return { hash: amp[1], status: "have", missing: [], preamble: false };
+    if (data.includes("PREAMBLE")) return { hash: amp[1], status: "miss", missing: [], preamble: true };
+    const missing = data.split(/[^0-9]+/).filter(Boolean).map(Number);
+    return { hash: amp[1], status: missing.length ? "miss" : "none", missing, preamble: false };
   }
-  const dest = rest[0] && !STOP.has(rest[0]) ? rest[0] : "OPIN";
-  return [qty, prec, dest];
+  if (/\bZEV\b/.test(line) && !line.includes("INT") && !line.includes("ZKE")) {
+    return { hash: hashOf(line), status: line.includes("ZUG") ? "none" : "have", missing: [], preamble: false };
+  }
+  if (line.includes("CONFIRMED")) return { hash: hashOf(line), status: "have", missing: [], preamble: false };
+  const plain = line.match(/MISSING(?:\s+BLOCKS)?\s*:\s*([0-9][0-9,\s]*)/);
+  if (plain && !line.includes("<MISSING")) {
+    const missing = plain[1].split(/[^0-9]+/).filter(Boolean).map(Number);
+    return { hash: hashOf(line), status: "miss", missing, preamble: false };
+  }
+  return null;
 }
 
 function detectMethod(text: string): Method {
   if (text.includes("/WL2K") || /\bWL2K\b/.test(text)) return "WL2K";
   if (/\bZKE\b/.test(text) && /\bIP\b/.test(text)) return "IP";
   return "RF";
+}
+
+function qsyRoger(text: string): boolean {
+  const tokens = text.split(" ");
+  const at = tokens.indexOf("QSY");
+  if (at < 0) return false;
+  return tokens.slice(0, at).includes("R");
+}
+
+function zofOrder(text: string): { quantity: number; name: string } | null {
+  const tokens = text.split(" ");
+  const at = tokens.indexOf("ZOF");
+  if (at < 0) return null;
+  let i = at + 1;
+  let quantity = 1;
+  if (/^\d+$/.test(tokens[i] ?? "")) {
+    quantity = Number(tokens[i]);
+    i += 1;
+  }
+  const name = (tokens[i] ?? "").replace(/[^A-Z0-9_.-]/g, "");
+  if (!name || STOP.has(name)) return null;
+  return { quantity, name };
 }
 
 function channelIn(text: string): string | null {
@@ -189,18 +424,6 @@ function channelIn(text: string): string | null {
   const next = tokens[i + 1];
   if (!next || next === "BACK" || next === "NET") return null;
   return next.replace(/[^A-Z0-9]/g, "");
-}
-
-function missingBlocks(text: string): number[] | null {
-  const m = text.match(/MISSING(?:\s+BLOCKS)?\s*:?\s*([0-9,\s]+)/);
-  if (!m) return null;
-  const nums = m[1].split(/[^0-9]+/).filter(Boolean).map(Number);
-  return nums;
-}
-
-function blockCount(text: string): number | null {
-  const m = text.match(/\b(?:NBLK|BLKS|BLOCKS)\s*:?\s*(\d+)/);
-  return m ? Number(m[1]) : null;
 }
 
 function stationOf(net: Net, call: string): Station | undefined {
@@ -231,6 +454,9 @@ function upsert(net: Net, call: string, method: Method): Net {
         qsyChannel: null,
         qsySince: null,
         agency: "",
+        relay: false,
+        closeAsk: false,
+        zksAhead: null,
       },
     ],
   };
@@ -241,6 +467,44 @@ function patch(net: Net, call: string, partial: Partial<Station>): Net {
     ...net,
     stations: net.stations.map((s) => (s.call === call ? { ...s, ...partial } : s)),
   };
+}
+
+function noteRelay(net: Net, call: string, why: "ZKJ" | "ZCJ"): Net {
+  if (!net.netOpen || !call || call === net.ncs) return net;
+  if (stationOf(net, call)?.relay) {
+    return stationOf(net, call)?.closeAsk ? patch(net, call, { closeAsk: false }) : net;
+  }
+  let next = upsert(net, call, stationOf(net, call)?.method ?? "RF");
+  const at = next.zks.indexOf(call);
+  const saved = why === "ZCJ" ? (at >= 0 ? next.zks.slice(0, at) : stationOf(next, call)?.zksAhead ?? null) : stationOf(next, call)?.zksAhead ?? null;
+  next = patch(next, call, { relay: true, pending: false, closeAsk: false, zksAhead: saved });
+  if (why === "ZCJ" && at >= 0) next = { ...next, zks: next.zks.filter((c) => c !== call) };
+  const note = why === "ZCJ" ? `${call} ZCJ — off the roll, remaining files ZOF ZOK WL2K` : `${call} ${why} — remaining files ZOF ZOK WL2K`;
+  return log(next, note, call);
+}
+
+/** ZUG ZCJ: equipment is back. Return the station to the roll slot they left. */
+function restoreRelay(net: Net, call: string): Net {
+  if (!call || call === net.ncs) return net;
+  const st = stationOf(net, call);
+  let next = st ? patch(net, call, { relay: false, zksAhead: null }) : upsert(net, call, "RF");
+  if (!st) next = patch(next, call, { relay: false, pending: false });
+  if (next.zks.includes(call)) return log(next, `${call} ZUG ZCJ — back on the roll`, call);
+  const ahead = st?.zksAhead;
+  if (!ahead) return addZks(next, call, "ZUG ZCJ");
+  let at = 0;
+  for (const prev of ahead) {
+    const i = next.zks.indexOf(prev);
+    if (i >= 0) at = i + 1;
+  }
+  const zks = [...next.zks];
+  zks.splice(at, 0, call);
+  return log({ ...next, zks }, `${call} ZUG ZCJ — back on the roll`, call);
+}
+
+function closeRoger(text: string): boolean {
+  if (/\b(ZBO|ZEV|ZNB|ZOF|QSY|ZKE|ZKS|IMI|ZKA|ZCJ)\b/.test(text)) return false;
+  return text.split(" ").includes("R");
 }
 
 function addZks(net: Net, call: string, reason: string): Net {
@@ -256,92 +520,218 @@ function addZks(net: Net, call: string, reason: string): Net {
   return log({ ...net, zks }, `${call} added to ZKS (${reason})`, call);
 }
 
-function addTraffic(net: Net, originator: string, qty: number, prec: string, dest: string, file: string | null): Net {
-  const dup = [...net.traffic].reverse().find(
-    (t) => t.originator === originator && t.quantity === qty && t.precedence === prec && t.destination === dest && (file === null || t.file === file || t.file === null),
-  );
-  if (dup) return log(net, `${originator} repeated ZBO ${qty} ${prec} ${dest} — already listed`);
-  const item: Traffic = {
-    id: net.nextId,
-    originator,
-    quantity: qty,
-    precedence: prec,
-    destination: dest,
-    file,
-    blocks: null,
-    received: [],
-    refused: [],
-    missingBy: {},
-    zof: false,
-    via: dest.includes("WL2K") ? "wl2k" : "undecided",
-  };
-  return log(
-    { ...net, nextId: net.nextId + 1, traffic: [...net.traffic, item] },
-    `${originator} listed ${qty} ${prec} for ${dest}`,
-    originator,
-  );
-}
-
-function trafficIndex(net: Net, file: string | null): number {
-  if (file) {
-    const exact = net.traffic.findIndex((t) => t.file === file);
-    if (exact >= 0) return exact;
+function parseZksRoll(text: string): { call: string; method: Method }[] | null {
+  const tokens = text.split(" ");
+  const at = tokens.indexOf("ZKS");
+  if (at < 0 || tokens.includes("INT")) return null;
+  const list: { call: string; method: Method }[] = [];
+  for (let i = at + 1; i < tokens.length; i++) {
+    let token = tokens[i].replace(/[.,:;]/g, "");
+    if (!token || token === "K" || token === "AR" || token === "AS") break;
+    let suffix = "";
+    if (token.includes("/")) {
+      const parts = token.split("/");
+      token = parts[0];
+      suffix = parts[1] ?? "";
+    } else if (tokens[i + 1] === "IP" || tokens[i + 1] === "WL2K" || tokens[i + 1] === "NCS") {
+      suffix = tokens[i + 1];
+      i += 1;
+    }
+    const call = token.replace(/[^A-Z0-9]/g, "");
+    if (!CALL.test(call)) break;
+    if (suffix === "NCS") continue;
+    const method: Method = suffix === "WL2K" ? "WL2K" : suffix === "IP" ? "IP" : "RF";
+    if (!list.some((entry) => entry.call === call)) list.push({ call, method });
   }
-  for (let i = net.traffic.length - 1; i >= 0; i--) if (net.traffic[i].zof) return i;
-  return net.traffic.length ? net.traffic.length - 1 : -1;
+  return list;
 }
 
-function maybeComplete(net: Net, index: number): Net {
-  const item = net.traffic[index];
-  if (!item?.zof || net.zks.length === 0) return net;
-  const answered = new Set([...item.received, ...item.refused]);
-  if (!net.zks.every((c) => answered.has(c))) return net;
+function zksSignature(entries: { call: string; method: Method }[]): string {
+  const air = entries.filter((e) => e.method !== "WL2K").map((e) => (e.method === "IP" ? `${e.call}/IP` : e.call));
+  const wl = entries.filter((e) => e.method === "WL2K").map((e) => `${e.call}/WL2K`);
+  return [...air, ...wl].join(" ");
+}
+
+/** Non-NCS desks take a ZKS from net control as the whole roll. An identical list is ignored. */
+function adoptZks(net: Net, text: string): Net {
+  const list = parseZksRoll(text);
+  if (!list) return net;
+  const current = net.zks.map((call) => ({ call, method: stationOf(net, call)?.method ?? "RF" as Method }));
+  if (zksSignature(current) === zksSignature(list)) return net;
+  const ordered = [...list.filter((e) => e.method !== "WL2K"), ...list.filter((e) => e.method === "WL2K")];
+  let next = net;
+  for (const entry of ordered) {
+    next = upsert(next, entry.call, entry.method);
+    const prev = stationOf(next, entry.call);
+    next = patch(next, entry.call, {
+      method: entry.method,
+      pending: false,
+      exempt: entry.method === "WL2K" ? true : prev?.exempt ?? false,
+    });
+  }
+  return log(
+    { ...next, zks: ordered.map((e) => e.call) },
+    `ZKS set from net control: ${zksSignature(ordered) || "(empty)"}`,
+    net.ncs || "NCS",
+  );
+}
+
+function acknowledge(net: Net, from: string, pieces: Piece[]): Net {
+  const existing = net.traffic.find((t) => t.originator === from);
+  const traffic = existing
+    ? net.traffic.map((t) => (t.originator === from ? { ...t, pieces } : t))
+    : [...net.traffic, { id: net.nextId, originator: from, pieces }];
   return log(
     {
       ...net,
-      traffic: net.traffic.filter((_, i) => i !== index),
-      done: [...net.done, item],
+      nextId: existing ? net.nextId : net.nextId + 1,
+      offers: net.offers.filter((o) => o.from !== from),
+      traffic,
     },
-    `Completed ${item.file ?? item.destination} — Winlink follow-up for anyone with ZUG ZEV`,
+    `${from} on the ZBO list — ${pieceText(pieces)}`,
+    from,
   );
 }
 
-function recordZev(net: Net, call: string, file: string | null, negative: boolean, missing: number[] | null): Net {
-  const real = trafficIndex(net, file);
-  if (real < 0) return log(net, `${call} sent ${negative ? "ZUG ZEV" : "ZEV"} but no traffic is open`, call);
-  const traffic = net.traffic.map((t, i) => {
-    if (i !== real) return t;
-    const received = new Set(t.received);
-    const refused = new Set(t.refused);
-    const missingBy = { ...t.missingBy };
-    if (negative || (missing && missing.length)) {
-      refused.add(call);
-      received.delete(call);
-      if (missing?.length) missingBy[call] = missing;
-    } else {
-      received.add(call);
-      refused.delete(call);
-      delete missingBy[call];
-    }
-    return { ...t, file: file ?? t.file, blocks: t.blocks, received: [...received], refused: [...refused], missingBy };
+function upsertOffer(net: Net, from: string, pieces: Piece[]): Net {
+  const existing = net.offers.find((o) => o.from === from);
+  const offers = existing
+    ? net.offers.map((o) => (o.from === from ? { ...o, pieces } : o))
+    : [...net.offers, { id: net.nextId, from, pieces }];
+  return log(
+    { ...net, nextId: existing ? net.nextId : net.nextId + 1, offers },
+    `${from} offered ${pieceText(pieces)} — not listed until NCS acknowledges`,
+    from,
+  );
+}
+
+function consumeOne(net: Net, sender: string, index: number): Net {
+  const transfer = net.transfers[index];
+  if (!transfer || transfer.counted) return net;
+  const mark = (traffic: Traffic[], listing: string | null) => ({
+    ...net,
+    traffic,
+    transfers: net.transfers.map((t, i) => (i === index ? { ...t, counted: true, originator: t.originator ?? sender, listing: listing ?? t.listing } : t)),
   });
-  let next = log(
-    { ...net, traffic },
-    negative || missing?.length
-      ? `${call} ${missing?.length ? `missing blocks ${missing.join(" ")}` : "ZUG ZEV"} on ${traffic[real].file ?? traffic[real].destination}`
-      : `${call} ZEV — has ${traffic[real].file ?? traffic[real].destination}`,
-    call,
-  );
-  return maybeComplete(next, real);
+  const row = net.traffic.find((t) => t.originator === sender);
+  if (!row) return mark(net.traffic, null);
+  const tokens = new Set((transfer.file || "").toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean));
+  let pieceAt = row.pieces.findIndex((p) => p.quantity > 0 && p.destinations.some((d) => tokens.has(d)));
+  if (pieceAt < 0) pieceAt = row.pieces.findIndex((p) => p.quantity > 0);
+  if (pieceAt < 0) return mark(net.traffic, null);
+  const piece = row.pieces[pieceAt];
+  const listing = `${piece.precedence} ${piece.destinations.join(" ")}`;
+  const pieces = row.pieces
+    .map((p, i) => (i === pieceAt ? { ...p, quantity: p.quantity - 1 } : p))
+    .filter((p) => p.quantity > 0);
+  const traffic = pieces.length
+    ? net.traffic.map((t) => (t.originator === sender ? { ...t, pieces } : t))
+    : net.traffic.filter((t) => t.originator !== sender);
+  const note = pieces.length
+    ? `${sender} sent one ${listing}. ZBO now ${pieceText(pieces)}`
+    : `${sender} ${listing} moved off the ZBO list`;
+  return log(mark(traffic, listing), note, sender);
 }
 
-function markZof(net: Net, file: string | null, call: string | null): Net {
-  const idx = trafficIndex(net, file);
-  if (idx < 0) return log(net, "ZOF seen with no open traffic");
-  const traffic = net.traffic.map((t, i) => (i === idx ? { ...t, zof: true, file: file ?? t.file, via: t.via === "undecided" ? "air" : t.via } : t));
-  let next = log({ ...net, traffic }, `ZOF for ${file ?? traffic[idx].destination}`);
-  if (call) next = { ...next, turn: call };
+function openFile(net: Net, hash: string, file: string | null, originator: string | null, blocks: number | null): Net {
+  const existing = net.transfers.findIndex((t) => (hash && t.hash === hash) || (!hash && file && t.file === file));
+  if (existing < 0) {
+    const item: Transfer = {
+      id: net.nextId,
+      hash,
+      file: file ?? "Unassigned",
+      originator,
+      blocks,
+      counted: false,
+      listing: null,
+      reports: {},
+      viaWl2k: [],
+    };
+    let next = log(
+      { ...net, nextId: net.nextId + 1, transfers: [...net.transfers, item] },
+      `File ${item.file}${hash ? ` {${hash}}` : ""} on the air${originator ? ` from ${originator}` : ""}`,
+    );
+    if (originator) next = consumeOne(next, originator, next.transfers.length - 1);
+    return next;
+  }
+  let next: Net = {
+    ...net,
+    transfers: net.transfers.map((t, i) => i === existing ? {
+      ...t,
+      hash: t.hash || hash,
+      file: file && (t.file === "Unassigned" || !t.file) ? file : t.file,
+      originator: t.originator ?? originator,
+      blocks: blocks ?? t.blocks,
+    } : t),
+  };
+  const sender = next.transfers[existing].originator;
+  if (sender && !next.transfers[existing].counted) next = consumeOne(next, sender, existing);
   return next;
+}
+
+function recordReport(net: Net, call: string, hash: string | null, file: string | null, report: FileReport): Net {
+  let idx = hash ? net.transfers.findIndex((t) => t.hash === hash) : -1;
+  if (idx < 0 && file) idx = net.transfers.findIndex((t) => t.file === file);
+  if (idx < 0 && net.transfers.length === 1) idx = 0;
+  if (idx < 0) {
+    if (!hash && !file) return log(net, `${call} reported a file but none is on the air`, call);
+    net = openFile(net, hash ?? "", file, null, null);
+    idx = net.transfers.length - 1;
+  }
+  const transfers = net.transfers.map((t, i) => i === idx ? { ...t, reports: { ...t.reports, [call]: report } } : t);
+  const item = transfers[idx];
+  const note = report.status === "have"
+    ? "ZEV"
+    : report.preamble
+      ? "missing preamble"
+      : report.status === "none"
+        ? "ZUG ZEV"
+        : `missing ${report.missing.join(" ")}`;
+  return log({ ...net, transfers }, `${call} ${note} on ${item.file}${item.hash ? ` {${item.hash}}` : ""}`, call);
+}
+
+type Cursor = { speaker: string | null; file: string | null; hash: string | null };
+
+function applyTraffic(net: Net, text: string, cursor: Cursor, ncsMode: boolean): { net: Net; suggestion: string | null } {
+  let suggestion: string | null = null;
+  const speaker = extractSpeaker(text);
+  if (speaker) cursor.speaker = speaker;
+  const file = filenameOf(text);
+  if (file) cursor.file = file;
+  const hash = hashOf(text);
+  if (hash) cursor.hash = hash;
+  const sender = idCall(text);
+  const blocks = sizeBlocks(text);
+  const who = speaker ?? cursor.speaker;
+
+  if (text.includes("<FILE") || text.includes("<ID") || text.includes("<SIZE")) {
+    const h = hash ?? cursor.hash;
+    if (h) {
+      const from = text.includes("<FILE") ? (sender ?? cursor.speaker) : sender;
+      net = openFile(net, h, file ?? cursor.file, from, blocks);
+    }
+  }
+
+  const pieces = parseZboPieces(text);
+  if (pieces && !text.includes("INT")) {
+    const isUs = who === net.ncs;
+    const called = calledStation(text);
+    if (isUs && called && hasRoger(text)) net = acknowledge(net, called, pieces);
+    else if (isUs) net = acknowledge(net, net.ncs, pieces);
+    else if (who) {
+      net = upsertOffer(net, who, pieces);
+      if (ncsMode && !text.includes("ZKE")) suggestion = scriptAckZbo(net.ncs, who, pieces);
+    }
+  }
+
+  if (!text.includes("INT") && !text.includes("ZKE")) {
+    const report = flampReport(text);
+    if (report && who) {
+      const { hash: reportHash, ...body } = report;
+      net = recordReport(net, who, reportHash ?? cursor.hash, file ?? cursor.file, body);
+    }
+  }
+  return { net, suggestion };
 }
 
 export function pendingCalls(net: Net): string[] {
@@ -375,13 +765,56 @@ export function zksLine(net: Net): string {
   return parts.join(" ");
 }
 
-export function unanswered(net: Net, item: Traffic): string[] {
-  const answered = new Set([...item.received, ...item.refused]);
-  return net.zks.filter((c) => !answered.has(c));
+export function transferRoster(net: Net, item: Transfer): { call: string; report: FileReport | null }[] {
+  const calls = net.zks.filter((c) => c !== item.originator);
+  if (net.ncs && net.ncs !== item.originator && !calls.includes(net.ncs)) calls.push(net.ncs);
+  for (const call of Object.keys(item.reports)) {
+    if (call !== item.originator && !calls.includes(call)) calls.push(call);
+  }
+  for (const call of item.viaWl2k ?? []) {
+    if (call !== item.originator && !calls.includes(call)) calls.push(call);
+  }
+  return calls.map((call) => ({ call, report: item.reports[call] ?? null }));
 }
 
-export function scriptOpen(ncs: string) {
-  return `OPIN DE ${ncs} ZKA ZKB AS`;
+/** Calls who get this file by Winlink: /WL2K check-ins, stations who ZKJ or ZCJ, plus anyone moved there by hand. */
+export function fileViaWl2k(net: Net, item: Transfer): string[] {
+  const auto = net.zks.filter((call) => call !== item.originator && stationOf(net, call)?.method === "WL2K");
+  const relay = net.stations
+    .filter((s) => s.relay && s.call !== item.originator && !auto.includes(s.call) && item.reports[s.call]?.status !== "have")
+    .map((s) => s.call);
+  const manual = (item.viaWl2k ?? []).filter((call) => call !== item.originator && !auto.includes(call) && !relay.includes(call));
+  return [...auto, ...relay, ...manual];
+}
+
+export function sendViaWl2k(net: Net, id: number, call: string): Net {
+  const clean = call.toUpperCase();
+  const item = net.transfers.find((t) => t.id === id);
+  if (!item || item.originator === clean) return net;
+  if (stationOf(net, clean)?.method === "WL2K") return net;
+  if ((item.viaWl2k ?? []).includes(clean)) return net;
+  return log(
+    {
+      ...net,
+      transfers: net.transfers.map((t) => (t.id === id ? { ...t, viaWl2k: [...(t.viaWl2k ?? []), clean] } : t)),
+    },
+    `${clean} moved to ZOF ZOK WL2K for ${item.file}`,
+    clean,
+  );
+}
+
+export function recallFromWl2k(net: Net, id: number, call: string): Net {
+  return {
+    ...net,
+    transfers: net.transfers.map((t) => (t.id === id ? { ...t, viaWl2k: (t.viaWl2k ?? []).filter((c) => c !== call) } : t)),
+  };
+}
+
+export function scriptOpen(ncs: string, rows: Rows | null): string | null {
+  if (!rows) return null;
+  const group = volunteerTriplet(rows);
+  if (!group) return null;
+  return `OPIN DE ${ncs} ZKA ZNB ${group} ZKB AS`;
 }
 export function scriptAgency(ncs: string) {
   return `OPIN DE ${ncs} INT AGENCY K`;
@@ -404,9 +837,28 @@ export function scriptImi(ncs: string, station: string) {
 export function scriptCloseOne(ncs: string, station: string) {
   return `${station} DE ${ncs} ZKJ K`;
 }
+export function scriptDrop(ncs: string, me: string, asNcs: boolean) {
+  return asNcs ? `OPIN DE ${ncs} ZKJ K` : `${ncs} DE ${me} ZKJ K`;
+}
+/** ZCJ: this station is having equipment trouble. */
+export function scriptEquipment(ncs: string, me: string, asNcs: boolean) {
+  return asNcs ? `OPIN DE ${ncs} ZCJ K` : `${ncs} DE ${me} ZCJ K`;
+}
+export function scriptOffer(ncs: string, me: string, pieces: Piece[]): string {
+  return `${ncs} DE ${me} ZBO ${pieceText(pieces)} K`;
+}
+export function scriptAckZbo(ncs: string, station: string, pieces: Piece[]): string {
+  return `${station} DE ${ncs} R ZBO ${pieceText(pieces)} AS AR`;
+}
+export function scriptIntZev(ncs: string, station: string, hash: string): string {
+  return `${station} DE ${ncs} INT ZEV ${hash} K`;
+}
 export function scriptZof(ncs: string, station: string, item: Traffic) {
-  const file = item.file ? ` ${item.file}` : "";
-  return `${station} DE ${ncs} ZOF ${item.quantity} ${item.precedence} ${item.destination}${file} K`;
+  return `${station} DE ${ncs} ZOF ${pieceText(item.pieces)} K`;
+}
+export function scriptQsyZof(ncs: string, from: string, partner: string, channel: string, quantity: number, name: string) {
+  const title = name.toUpperCase().replace(/[^A-Z0-9_.-]/g, "");
+  return `${from} ${partner} DE ${ncs} QSY ${channel} ZOF ${quantity || 1} ${title}`;
 }
 export function scriptQsy(ncs: string, station: string, channel: string) {
   return `${station} DE ${ncs} QSY ${channel} K`;
@@ -418,13 +870,39 @@ export function scriptChallenge(ncs: string, station: string, chal: string, znd?
   return `${station} DE ${ncs} ${znd ? `ZND ${znd} ` : ""}INT ZNB ${chal} K`;
 }
 
+/** On-air station this call follows. Null when they are first, or the roll has nobody else yet. */
+export function followsCall(net: Net, call: string): string | null {
+  const air = onAir(net).map((s) => s.call);
+  const idx = air.indexOf(call);
+  if (idx > 0) return air[idx - 1];
+  if (idx === 0) return null;
+  const last = [...air].reverse().find((c) => c !== call);
+  return last ?? null;
+}
+
+export function scriptJoinAck(net: Net, station: string): string {
+  const before = followsCall(net, station);
+  if (!before) return `${station} DE ${net.ncs} R`;
+  return `${station} DE ${net.ncs} R ZGO ${before}`;
+}
+
+export function requestAuth(net: Net, call: string, chal: string): Net {
+  let next = stationOf(net, call) ? net : upsert(net, call, stationOf(net, call)?.method ?? "RF");
+  const onRoll = next.zks.includes(call);
+  next = patch(next, call, { challenge: chal, pending: onRoll ? false : true });
+  return log(
+    next,
+    onRoll ? `${call} stays in place. INT ZNB ${chal}` : `INT ZNB ${chal} for ${call}`,
+    next.ncs,
+  );
+}
+
 function ack(ncs: string, station: string) {
   return `${station} DE ${ncs} R AS AR`;
 }
-function ackTraffic(ncs: string, station: string, qty: number, prec: string, dest: string) {
-  return `${station} DE ${ncs} R ZBO ${qty} ${prec} ${dest} AS AR`;
+export function operatorZbo(ncs: string, me: string, qty: number, prec: string, dest: string) {
+  return scriptOffer(ncs, me, [{ quantity: qty, precedence: prec, destinations: [dest] }]);
 }
-
 export function operatorCheckin(ncs: string, me: string, method: Method, group: string | null): string {
   const znb = group ? ` ZNB ${group}` : "";
   if (method === "WL2K") return `${ncs} DE ${me}/WL2K ZKE${znb} K`;
@@ -432,15 +910,53 @@ export function operatorCheckin(ncs: string, me: string, method: Method, group: 
   return `${ncs} DE ${me} ZKE${znb} K`;
 }
 
-export function operatorZbo(ncs: string, me: string, qty: number, prec: string, dest: string) {
-  return `${ncs} DE ${me} ZBO ${qty} ${prec} ${dest} K`;
-}
-
 export function operatorZev(ncs: string, me: string, negative: boolean) {
   return `${ncs} DE ${me} ${negative ? "ZUG ZEV" : "ZEV"} AR`;
 }
 
-export function interpret(net: Net, raw: string, rows: Rows | null, ncsMode: boolean): { net: Net; suggestion: string | null } {
+function judgeOpening(expected: string, claimant: string, group: string | null, rows: Rows | null, adopt: boolean): { proof: NcsProof; note: string; open: boolean; ncs: string } {
+  const triplet = group && group.length === 3 ? group : null;
+  if (!triplet) {
+    return {
+      proof: "none",
+      open: Boolean(expected) && claimant === expected,
+      ncs: expected,
+      note: `${claimant} sent ZKA with no DRYAD triplet. Stations cannot confirm this is the real net control.`,
+    };
+  }
+  if (!rows) {
+    return {
+      proof: "unknown",
+      open: Boolean(expected) && claimant === expected,
+      ncs: expected,
+      note: `${claimant} opened with ZNB ${triplet}. Load today's DRYAD before you trust that station.`,
+    };
+  }
+  if (!tripletValid(rows, triplet)) {
+    return {
+      proof: "bad",
+      open: false,
+      ncs: expected,
+      note: `${claimant} sent ZKA with ZNB ${triplet}, and it does not match the DRYAD. Do not follow this station as net control.`,
+    };
+  }
+  if (adopt || !expected || claimant === expected) {
+    return {
+      proof: "good",
+      open: true,
+      ncs: claimant,
+      note: `${claimant} is authenticated. ZNB ${triplet} matches the DRYAD.`,
+    };
+  }
+  return {
+    proof: "other",
+    open: false,
+    ncs: expected,
+    note: `${claimant} authenticated ZNB ${triplet}, but this desk expects ${expected}. Do not switch net control on that alone.`,
+  };
+}
+
+export function interpret(net: Net, raw: string, rows: Rows | null, ncsMode: boolean, trustKey = true): { net: Net; suggestion: string | null } {
   const text = raw.toUpperCase().trim().replace(/\s+/g, " ");
   if (text.length < 4) return { net, suggestion: null };
   const speaker = extractSpeaker(text);
@@ -449,24 +965,67 @@ export function interpret(net: Net, raw: string, rows: Rows | null, ncsMode: boo
   let suggestion: string | null = null;
   const method = detectMethod(text);
 
-  if (text.includes("ZKA") && isUs) net = { ...net, netOpen: true };
+  if (text.includes("ZKA")) {
+    const claimant = speaker;
+    if (claimant) {
+      const group = znbGroup(text);
+      const triplet = group && group.length === 3 ? group : null;
+      const judged = judgeOpening(ncs, claimant, group, trustKey ? rows : null, !ncsMode);
+      const accepted = judged.proof === "good";
+      const netOpen = accepted ? true : claimant === ncs ? judged.open : net.netOpen;
+      const aboutUs = accepted || claimant === ncs;
+      net = log(
+        {
+          ...net,
+          ncs: judged.ncs,
+          netOpen,
+          ncsProof: judged.proof,
+          ncsProofNote: judged.note,
+          ncsTriplet: aboutUs ? triplet : net.ncsTriplet,
+          ncsTripletOk: accepted ? true : aboutUs ? (judged.proof === "bad" ? false : null) : net.ncsTripletOk,
+        },
+        judged.note,
+        claimant,
+      );
+    }
+  }
   if (text.includes("ZKJ") && isUs && text.includes("OPIN")) net = { ...net, netOpen: false };
 
+  if (!ncsMode && speaker && (speaker === ncs || text.includes(`${speaker}/NCS`)) && text.split(" ").includes("ZKS")) {
+    net = adoptZks(net, text);
+  }
+
   if (text.includes("QSY")) {
-    const who = isUs ? calledStation(text) : speaker;
     const channel = channelIn(text);
     const back = /\bQSY\s+(BACK|NET)\b/.test(text);
-    if (who && back) {
-      net = patch(log(net, `${who} returned from QSY`, who), who, { qsyChannel: null, qsySince: null });
-    } else if (who && channel) {
-      net = upsert(net, who, stationOf(net, who)?.method ?? "RF");
-      net = patch(log(net, `${who} sent to ${channel}`, who), who, { qsyChannel: channel, qsySince: stamp() });
-      if (isUs) net = { ...net, turn: who };
+    if (!back && channel && addressedToNet(text) && CHANNELS.includes(channel)) {
+      net = moveNetChannel(net, channel, speaker ?? "SYSTEM");
+    } else if (back) {
+      const who = isUs ? calledStations(text) : speaker ? [speaker] : [];
+      for (const call of who) {
+        net = patch(log(net, `${call} returned from QSY`, call), call, { qsyChannel: null, qsySince: null });
+      }
+    } else if (!isUs && speaker && channel && qsyRoger(text)) {
+      net = ackQsy(net, speaker, channel);
+    } else if (isUs && channel) {
+      const calls = calledStations(text);
+      const order = zofOrder(text);
+      if (calls.length >= 2 && order) net = directQsy(net, calls[0], calls[1], channel, order.quantity, order.name);
+      else if (calls[0]) {
+        net = upsert(net, calls[0], stationOf(net, calls[0])?.method ?? "RF");
+        net = patch(log(net, `${calls[0]} sent to ${channel}`, calls[0]), calls[0], { qsyChannel: channel, qsySince: stamp() });
+        net = { ...net, turn: calls[0] };
+      }
+    } else if (!isUs && speaker && channel) {
+      net = upsert(net, speaker, stationOf(net, speaker)?.method ?? "RF");
+      net = patch(log(net, `${speaker} sent to ${channel}`, speaker), speaker, { qsyChannel: channel, qsySince: stamp() });
     }
   }
 
-  if (text.includes("ZOF") && !text.includes("INT")) {
-    net = markZof(net, filenameOf(text), isUs ? calledStation(text) : speaker);
+  if (text.includes("ZOF") && !text.includes("INT") && !text.includes("QSY")) {
+    const who = isUs ? calledStation(text) : speaker;
+    net = log(net, who ? `ZOF ${who}` : "ZOF", who ?? "SYSTEM");
+    if (who) net = { ...net, turn: who };
   }
 
   if (speaker && !isUs && text.split(" ").includes("IMI")) {
@@ -479,30 +1038,29 @@ export function interpret(net: Net, raw: string, rows: Rows | null, ncsMode: boo
       net = upsert(net, speaker, method);
       net = patch(net, speaker, { zug: true, exempt: true, pending: false, authenticated: false, method });
       net = addZks(net, speaker, "ZUG ZNB");
-      suggestion = ncsMode ? ack(ncs, speaker) : null;
+      suggestion = ncsMode ? scriptJoinAck(net, speaker) : null;
     } else if (text.includes("ZKE") && !text.includes("INT")) {
       net = upsert(log(net, `${speaker} checked in (${method})`, speaker), speaker, method);
       net = patch(net, speaker, { method });
       const group = znbGroup(text);
       if (group && group.length === 3) net = patch(net, speaker, { volunteered: group });
-      let authed = false;
       if (method === "WL2K") {
         net = patch(net, speaker, { exempt: true, pending: false, method: "WL2K" });
         net = addZks(net, speaker, "Winlink check-in");
         suggestion = ncsMode ? ack(ncs, speaker) : null;
-        authed = true;
       } else if (ncsMode && group && group.length === 3 && rows) {
         const expected = authenticate(rows, group[0], group[1]);
         if (expected && expected === group[2]) {
-          net = patch(net, speaker, { authenticated: true, pending: false });
+          net = patch(net, speaker, { authenticated: true, pending: false, volunteered: group, zug: false, exempt: false });
           net = addZks(net, speaker, "DRYAD authenticated");
+          suggestion = ncsMode ? scriptJoinAck(net, speaker) : null;
           net = log(net, `${speaker} volunteered ZNB ${group} — matches`, speaker);
-          authed = true;
         } else {
           const chal = challengeFrom(rows) ?? "??";
-          net = patch(net, speaker, { challenge: chal });
+          const onRoll = net.zks.includes(speaker);
+          net = patch(net, speaker, { challenge: chal, authenticated: false, pending: onRoll ? false : true });
           suggestion = scriptChallenge(ncs, speaker, chal, "2");
-          net = log(net, `${speaker} volunteered ZNB ${group} — does not match. ZND 2.`, speaker);
+          net = log(net, `${speaker} volunteered ZNB ${group} — does not match. Kept ${onRoll ? "in place" : "pending"}.`, speaker);
         }
       } else if (ncsMode && rows && !stationOf(net, speaker)?.authenticated && !stationOf(net, speaker)?.exempt) {
         const chal = rows ? challengeFrom(rows) : null;
@@ -514,10 +1072,6 @@ export function interpret(net: Net, raw: string, rows: Rows | null, ncsMode: boo
       } else if (!rows && ncsMode) {
         net = log(net, `${speaker} is pending. Load a DRYAD or accept ZUG ZNB.`, speaker);
       }
-      if (authed) {
-        const zbo = parseZbo(text);
-        suggestion = ncsMode && zbo && !text.includes("QRU") ? ackTraffic(ncs, speaker, ...zbo) : suggestion;
-      }
     } else if (text.includes("ZNB") && !text.includes("INT") && !text.includes("ZUG")) {
       const group = znbGroup(text);
       const st = stationOf(net, speaker);
@@ -525,64 +1079,73 @@ export function interpret(net: Net, raw: string, rows: Rows | null, ncsMode: boo
         const expected = authenticate(rows, st.challenge[0], st.challenge[1]);
         const got = group.length === 1 ? group[0] : group.length === 3 ? group[2] : "";
         if (expected && got === expected) {
-          net = patch(net, speaker, { authenticated: true, pending: false });
-          net = addZks(net, speaker, "DRYAD authenticated");
-          suggestion = ack(ncs, speaker);
-          net = log(net, `${speaker} authenticated with ZNB ${group}`, speaker);
+          const shown = group.length === 3 ? group : `${st.challenge.slice(0, 2)}${got}`;
+          const onRoll = net.zks.includes(speaker);
+          net = patch(net, speaker, { authenticated: true, pending: false, volunteered: shown, zug: false, exempt: false });
+          if (!onRoll) net = addZks(net, speaker, "DRYAD authenticated");
+          else net = log(net, `${speaker} reauthenticated in place`, speaker);
+          suggestion = scriptJoinAck(net, speaker);
+          net = log(net, `${speaker} authenticated with ZNB ${shown}`, speaker);
         } else {
+          const shown = group.length === 3 ? group : got ? `${st.challenge.slice(0, 2)}${got}` : st.volunteered;
           const chal = challengeFrom(rows) ?? "??";
-          net = patch(net, speaker, { challenge: chal });
+          const onRoll = net.zks.includes(speaker);
+          net = patch(net, speaker, {
+            challenge: chal,
+            volunteered: shown,
+            authenticated: false,
+            pending: onRoll ? false : true,
+          });
           suggestion = scriptChallenge(ncs, speaker, chal, "2");
-          net = log(net, `${speaker} ZNB mismatch (got ${got || "—"}, expected ${expected || "—"})`, speaker);
+          net = log(net, `${speaker} ZNB mismatch (got ${got || "—"}, expected ${expected || "—"}). ${onRoll ? "Left in place." : "Still pending."}`, speaker);
         }
       }
     }
 
-    const zbo = parseZbo(text);
-    if (zbo && !text.includes("INT")) {
-      net = addTraffic(net, speaker, zbo[0], zbo[1], zbo[2], filenameOf(text));
-      if (!suggestion && net.zks.includes(speaker) && !text.includes("ZKE")) {
-        suggestion = ncsMode ? ackTraffic(ncs, speaker, zbo[0], zbo[1], zbo[2]) : null;
-      }
-    }
-
-    const file = filenameOf(text);
-    const missing = missingBlocks(text);
-    const blocks = blockCount(text);
-    if (blocks !== null) {
-      const idx = trafficIndex(net, file);
-      if (idx >= 0) {
-        const traffic = net.traffic.map((t, i) => (i === idx ? { ...t, blocks, file: file ?? t.file } : t));
-        net = { ...net, traffic };
-      }
-    }
-    if ((text.includes("ZEV") && !text.includes("INT")) || text.includes("CONFIRMED") || missing) {
-      const negative = text.includes("ZUG") || Boolean(missing?.length);
-      const confirmed = text.includes("CONFIRMED") || (text.includes("ZEV") && !text.includes("ZUG") && !missing?.length);
-      if (confirmed || negative) net = recordZev(net, speaker, file, !confirmed, missing);
+    if (text.includes("INT") && text.includes("ZKJ")) {
+      net = upsert(net, speaker, stationOf(net, speaker)?.method ?? method);
+      net = patch(net, speaker, { closeAsk: true });
+      net = log(net, `${speaker} asked INT ZKJ`, speaker);
     }
     if (text.includes("ZKJ") && !text.includes("INT")) {
       net = log(net, `${speaker} closing down (ZKJ)`, speaker);
+      net = noteRelay(net, speaker, "ZKJ");
     }
-  } else if (!speaker) {
-    const file = filenameOf(text);
-    if (file || text.includes("MISSING") || text.includes("CONFIRMED")) {
-      net = log(net, `FLAMP note: ${text}`);
+    if (text.includes("ZUG") && text.includes("ZCJ") && !text.includes("INT")) {
+      net = restoreRelay(net, speaker);
+    } else if (text.includes("ZCJ") && !text.includes("INT")) {
+      net = noteRelay(net, speaker, "ZCJ");
+    }
+  }
+
+  if (isUs && !text.includes("INT") && text.includes("ZUG") && text.includes("ZCJ")) {
+    for (const call of calledStations(text)) net = restoreRelay(net, call);
+  } else if (isUs && !text.includes("INT") && !text.includes("OPIN") && (text.includes("ZKJ") || text.includes("ZCJ"))) {
+    const why = text.includes("ZCJ") ? "ZCJ" : "ZKJ";
+    for (const call of calledStations(text)) net = noteRelay(net, call, why);
+  }
+  if (isUs && closeRoger(text)) {
+    for (const call of calledStations(text)) {
+      if (stationOf(net, call)?.closeAsk) net = noteRelay(net, call, "ZKJ");
     }
   }
 
   return { net, suggestion };
 }
 
-export function ingest(net: Net, block: string, rows: Rows | null, ncsMode: boolean): { net: Net; suggestion: string | null } {
+export function ingest(net: Net, block: string, rows: Rows | null, ncsMode: boolean, trustKey = true): { net: Net; suggestion: string | null } {
   let next = net;
   let suggestion: string | null = null;
+  const cursor: Cursor = { speaker: null, file: null, hash: null };
   for (const line of block.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const result = interpret(next, trimmed, rows, ncsMode);
+    const result = interpret(next, trimmed, rows, ncsMode, trustKey);
     next = result.net;
     if (result.suggestion) suggestion = result.suggestion;
+    const traffic = applyTraffic(next, trimmed.toUpperCase().replace(/\s+/g, " "), cursor, ncsMode);
+    next = traffic.net;
+    if (traffic.suggestion) suggestion = traffic.suggestion;
   }
   if (suggestion) next = { ...next, lastTx: suggestion };
   return { net: next, suggestion };
@@ -604,6 +1167,54 @@ export function addManualStation(net: Net, call: string, method: Method, exempt:
   return next;
 }
 
+export function directQsy(net: Net, from: string, partner: string, channel: string, quantity: number, name: string): Net {
+  const title = name.toUpperCase().replace(/[^A-Z0-9_.-]/g, "");
+  const freq = channel.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!CALL.test(from) || !CALL.test(partner) || !title || !freq) return net;
+  const jobs = net.qsos ?? [];
+  const open = jobs.find((job) => job.from === from && job.with === partner && job.channel === freq && job.name === title && !(job.fromAck && job.withAck));
+  if (open) return net;
+  const job: QsyJob = {
+    id: net.nextId,
+    from,
+    with: partner,
+    channel: freq,
+    quantity: quantity || 1,
+    name: title,
+    fromAck: false,
+    withAck: false,
+  };
+  return log(
+    { ...net, nextId: net.nextId + 1, qsos: [...jobs, job], turn: from },
+    `${from} and ${partner} directed QSY ${freq} ZOF ${job.quantity} ${title}`,
+    net.ncs,
+  );
+}
+
+function ackQsy(net: Net, call: string, channel: string): Net {
+  const jobs = net.qsos ?? [];
+  const idx = jobs.findIndex((job) => job.channel === channel && (job.from === call || job.with === call) && (job.from === call ? !job.fromAck : !job.withAck));
+  let next = net;
+  if (idx >= 0) {
+    const job = jobs[idx];
+    const updated = { ...job, fromAck: job.fromAck || job.from === call, withAck: job.withAck || job.with === call };
+    const both = updated.fromAck && updated.withAck;
+    next = log(
+      { ...next, qsos: jobs.map((item, i) => (i === idx ? updated : item)) },
+      both ? `${updated.from} and ${updated.with} both rogered QSY ${channel}` : `${call} rogered QSY ${channel}`,
+      call,
+    );
+  } else {
+    next = log(next, `${call} rogered QSY ${channel}`, call);
+  }
+  next = upsert(next, call, stationOf(next, call)?.method ?? "RF");
+  return patch(next, call, { qsyChannel: channel, qsySince: stamp() });
+}
+
+export function dismissQsy(net: Net, id: number): Net {
+  return { ...net, qsos: (net.qsos ?? []).filter((job) => job.id !== id) };
+}
+
 export function setQsy(net: Net, call: string, channel: string | null): Net {
   const next = stationOf(net, call) ? net : upsert(net, call, "RF");
   if (!channel) return patch(log(next, `${call} back on the net`, call), call, { qsyChannel: null, qsySince: null });
@@ -614,41 +1225,59 @@ export function setTurn(net: Net, call: string | null): Net {
   return log({ ...net, turn: call }, call ? `${call} has the circuit` : "Circuit clear");
 }
 
-export function addManualTraffic(net: Net, originator: string, qty: number, prec: string, dest: string, file: string): Net {
-  return addTraffic(net, originator.toUpperCase(), qty, prec, dest.toUpperCase(), file.trim() ? file.trim().toUpperCase() : null);
+export function outboundScript(ncs: string, rows: OutboundItem[]): string {
+  const order: string[] = [];
+  const grouped = new Map<string, Piece[]>();
+  for (const row of rows) {
+    if (!grouped.has(row.sender)) order.push(row.sender);
+    const list = grouped.get(row.sender) ?? [];
+    list.push({ quantity: row.quantity, precedence: row.precedence, destinations: row.destinations });
+    grouped.set(row.sender, list);
+  }
+  return order.map((sender) => scriptOffer(ncs, sender, grouped.get(sender) ?? [])).join("\n");
 }
 
-export function setVia(net: Net, id: number, via: Traffic["via"]): Net {
+export function addOutbound(net: Net, sender: string, quantity: number, precedence: string, destinations: string): Net {
+  const call = sender.toUpperCase().split("/")[0].replace(/[^A-Z0-9]/g, "");
+  const dests = destinations.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+  if (!CALL.test(call) || !quantity || !dests.length) return net;
   return {
     ...net,
-    traffic: net.traffic.map((t) => (t.id === id ? { ...t, via } : t)),
+    outbound: [...net.outbound, { sender: call, quantity, precedence, destinations: dests }],
   };
 }
 
-export function directTraffic(net: Net, id: number, station: string): Net {
-  const item = net.traffic.find((t) => t.id === id);
-  if (!item) return net;
-  const traffic = net.traffic.map((t) => (t.id === id ? { ...t, zof: true, via: t.via === "undecided" ? "air" : t.via } : t));
-  return log({ ...net, traffic, turn: station }, `Directed ${station} — ZOF ${item.quantity} ${item.precedence} ${item.destination}`, net.ncs);
+export function removeOutbound(net: Net, index: number): Net {
+  return { ...net, outbound: net.outbound.filter((_, i) => i !== index) };
 }
 
-export function markComplete(net: Net, id: number): Net {
-  const item = net.traffic.find((t) => t.id === id);
+export function listOnNet(net: Net): Net {
+  const seen = new Set<string>();
+  let next = net;
+  for (const row of net.outbound) {
+    if (!row.sender || seen.has(row.sender)) continue;
+    seen.add(row.sender);
+    const pieces = net.outbound
+      .filter((item) => item.sender === row.sender)
+      .map(({ quantity, precedence, destinations }) => ({ quantity, precedence, destinations }));
+    next = acknowledge(next, row.sender, pieces);
+  }
+  return next;
+}
+
+export function acknowledgeOffer(net: Net, id: number): Net {
+  const offer = net.offers.find((o) => o.id === id);
+  if (!offer) return net;
+  return acknowledge(net, offer.from, offer.pieces);
+}
+
+export function dismissTransfer(net: Net, id: number): Net {
+  const item = net.transfers.find((t) => t.id === id);
   if (!item) return net;
   return log(
-    {
-      ...net,
-      traffic: net.traffic.filter((t) => t.id !== id),
-      done: [...net.done, { ...item, zof: true }],
-    },
-    `Moved to follow-up: ${item.file ?? item.destination}`,
+    { ...net, transfers: net.transfers.filter((t) => t.id !== id) },
+    `Cleared ${item.file}${item.hash ? ` {${item.hash}}` : ""}`,
   );
-}
-
-export function recordManualZev(net: Net, id: number, call: string, kind: "zev" | "miss" | "partial", blocks: number[]): Net {
-  const index = net.traffic.findIndex((t) => t.id === id);
-  if (index < 0) return net;
-  return recordZev(net, call.toUpperCase(), net.traffic[index].file, kind !== "zev", kind === "partial" ? blocks : kind === "miss" ? [] : null);
 }
 
 export function addInbox(net: Net, text: string): Net {
@@ -698,10 +1327,13 @@ export function moveFile(net: Net, id: number, folder: string): Net {
 export function listFile(net: Net, id: number): { net: Net; suggestion: string } {
   const file = net.files.find((f) => f.id === id);
   if (!file) return { net, suggestion: "" };
-  let next = addManualTraffic(net, net.myCall || net.ncs, 1, file.precedence, file.destination, file.name);
-  next = { ...next, files: next.files.map((f) => (f.id === id ? { ...f, listed: true } : f)) };
-  const suggestion = operatorZbo(net.ncs, net.myCall || net.ncs, 1, file.precedence, file.destination);
-  return { net: { ...next, lastTx: suggestion }, suggestion };
+  const suggestion = scriptOffer(net.ncs, net.myCall || net.ncs, [{
+    quantity: 1,
+    precedence: file.precedence,
+    destinations: [file.destination || "OPIN"],
+  }]);
+  const next = { ...net, files: net.files.map((f) => (f.id === id ? { ...f, listed: true } : f)), lastTx: suggestion };
+  return { net: log(next, `Prepared ZBO for ${file.name}`), suggestion };
 }
 
 export function gatewayMessage(net: Net): string {
@@ -711,14 +1343,26 @@ export function gatewayMessage(net: Net): string {
     "",
     `ZKS ${zksLine(net)}`,
     "",
-    "On-air traffic:",
+    "ZBO list:",
   ];
   const all = [...net.traffic, ...net.done];
   if (!all.length) lines.push("(none listed)");
-  for (const t of all) {
-    lines.push(`${t.originator} ZBO ${t.quantity} ${t.precedence} ${t.destination} file=${t.file ?? "-"} via=${t.via}`);
-    if (t.refused.length) lines.push(`  need Winlink: ${t.refused.join(" ")}`);
-    if (t.received.length) lines.push(`  ZEV: ${t.received.join(" ")}`);
+  for (const t of all) lines.push(`${t.originator} ZBO ${pieceText(t.pieces)}`);
+  if (net.transfers.length) {
+    lines.push("", "Files:");
+    for (const t of net.transfers) {
+      lines.push(`${t.file}${t.hash ? ` {${t.hash}}` : ""}`);
+      const via = new Set(fileViaWl2k(net, t));
+      for (const row of transferRoster(net, t)) {
+        if (via.has(row.call)) continue;
+        if (!row.report) lines.push(`  ${row.call} not heard`);
+        else if (row.report.status === "have") lines.push(`  ${row.call} ZEV`);
+        else if (row.report.preamble) lines.push(`  ${row.call} missing preamble`);
+        else if (row.report.status === "none") lines.push(`  ${row.call} ZUG ZEV`);
+        else lines.push(`  ${row.call} missing ${row.report.missing.join(" ")}`);
+      }
+      if (via.size) lines.push(`  ${[...via].join(" ")} ZOF ZOK WL2K`);
+    }
   }
   const bounced = net.inbox.filter((m) => m.bounce).map((m) => m.from);
   lines.push("", `Bounces: ${bounced.join(" ") || "none"}`, `Groups: ${GROUPS.join(" ")}`);
@@ -737,6 +1381,7 @@ export function sessionReport(net: Net): string {
     `End:   ${end.toISOString().slice(0, 16).replace("T", " ")}Z`,
     `Duration: ${minutes} minutes`,
     `Band / channel: ${net.band} ${net.channel}`,
+    `NCS authentication: ${net.ncsProof}${net.ncsProofNote ? ` — ${net.ncsProofNote}` : ""}`,
     "",
     "ZKS:",
     zksLine(net),
@@ -747,22 +1392,32 @@ export function sessionReport(net: Net): string {
     "QSY still out:",
     awayStations(net).map((s) => `${s.call} ${s.qsyChannel} since ${s.qsySince}`).join("\n") || "(none)",
     "",
-    "Traffic still open:",
+    "QSY orders:",
   ];
-  if (!net.traffic.length) lines.push("(none)");
-  for (const t of net.traffic) {
-    lines.push(`  ${t.originator} ZBO ${t.quantity} ${t.precedence} ${t.destination} file=${t.file ?? "-"} ZOF=${t.zof} via=${t.via}`);
-    lines.push(`    ZEV: ${t.received.join(", ") || "-"}`);
-    lines.push(`    ZUG ZEV / partial: ${t.refused.join(", ") || "-"}`);
-    const missing = Object.entries(t.missingBy).map(([c, b]) => `${c} missing ${b.join(" ")}`);
-    if (missing.length) lines.push(`    blocks: ${missing.join("; ")}`);
+  if (!(net.qsos ?? []).length) lines.push("(none)");
+  for (const job of net.qsos ?? []) {
+    lines.push(`  ${job.from} ${job.with} QSY ${job.channel} ZOF ${job.quantity} ${job.name} — ${job.from} ${job.fromAck ? "R" : "waiting"}, ${job.with} ${job.withAck ? "R" : "waiting"}`);
   }
-  lines.push("", "Winlink follow-up:");
-  if (!net.done.length) lines.push("(none)");
-  for (const t of net.done) {
-    lines.push(`  ${t.file ?? t.destination} from ${t.originator} ${t.precedence} ${t.destination}`);
-    lines.push(`    received: ${t.received.join(", ") || "none"}`);
-    lines.push(`    need Winlink: ${t.refused.join(", ") || "none"}`);
+  lines.push(
+    "",
+    "ZBO list:",
+  );
+  if (!net.traffic.length) lines.push("(none)");
+  for (const t of net.traffic) lines.push(`  ${t.originator} ZBO ${pieceText(t.pieces)}`);
+  lines.push("", "Files:");
+  if (!net.transfers.length) lines.push("(none)");
+  for (const t of net.transfers) {
+    lines.push(`  ${t.file}${t.hash ? ` {${t.hash}}` : ""}${t.blocks ? ` ${t.blocks} blocks` : ""}${t.originator ? ` from ${t.originator}` : ""}`);
+    const via = new Set(fileViaWl2k(net, t));
+    for (const row of transferRoster(net, t)) {
+      if (via.has(row.call)) continue;
+      if (!row.report) lines.push(`    ${row.call} not heard`);
+      else if (row.report.status === "have") lines.push(`    ${row.call} ZEV`);
+      else if (row.report.preamble) lines.push(`    ${row.call} missing preamble`);
+      else if (row.report.status === "none") lines.push(`    ${row.call} ZUG ZEV`);
+      else lines.push(`    ${row.call} missing ${row.report.missing.join(" ")}`);
+    }
+    if (via.size) lines.push(`    ${[...via].join(" ")} ZOF ZOK WL2K`);
   }
   return lines.join("\n");
 }
