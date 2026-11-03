@@ -24,6 +24,7 @@ import {
   GROUPS,
   PRECEDENCE,
   acceptExempt,
+  addGatewayCalls,
   acknowledgeOffer,
   ackInbox,
   addFile,
@@ -55,6 +56,7 @@ import {
   removeOutbound,
   requestAuth,
   scriptAgency,
+  removeGatewayCall,
   scriptAckZbo,
   scriptChallenge,
   scriptCheckin,
@@ -62,6 +64,7 @@ import {
   scriptCloseOne,
   scriptDrop,
   scriptEquipment,
+  scriptGatewayCheckin,
   scriptImi,
   scriptJoinAck,
   scriptOpen,
@@ -73,6 +76,7 @@ import {
   scriptIntZev,
   sessionK2s,
   sessionReport,
+  trafficCloseout,
   setBounce,
   setQsy,
   setTurn,
@@ -123,7 +127,7 @@ function download(name: string, text: string) {
 
 const ROLES: { id: Role; label: string; hint: string }[] = [
   { id: "ncs", label: "NCS", hint: "Run the directed net" },
-  { id: "wl2k", label: "Winlink", hint: "Gateway and follow-up" },
+  { id: "wl2k", label: "WL2K-GO", hint: "Gateway operator" },
   { id: "ip", label: "IP", hint: "Folders and listings" },
   { id: "operator", label: "Operator", hint: "Check in and answer in turn" },
 ];
@@ -854,6 +858,19 @@ function RoleSteps({ net, rows, canOpen, offer, blockOpen }: { net: Net; rows: R
     }
     return true;
   };
+  const group = () => {
+    if (!rows) return null;
+    const chal = challengeFrom(rows);
+    const ans = chal ? authenticate(rows, chal[0], chal[1]) : null;
+    return chal && ans ? `${chal}${ans}` : null;
+  };
+  const checkin = [
+    { label: "ZKE + ZNB", run: () => { if (callReady()) offer(operatorCheckin(net.ncs, net.myCall, "RF", group())); } },
+    { label: "ZKE only", title: "Back from another frequency. Nothing after ZKE.", run: () => { if (callReady()) offer(`${net.ncs} DE ${net.myCall} ZKE K`); } },
+    { label: "ZUG ZNB", run: () => { if (callReady()) offer(`${net.ncs} DE ${net.myCall} ZUG ZNB K`); } },
+    { label: "ZEV", run: () => { if (callReady()) offer(operatorZev(net.ncs, net.myCall, false)); } },
+    { label: "ZUG ZEV", run: () => { if (callReady()) offer(operatorZev(net.ncs, net.myCall, true)); } },
+  ];
   if (net.role === "ncs") {
     return (
       <LineButtons
@@ -876,6 +893,7 @@ function RoleSteps({ net, rows, canOpen, offer, blockOpen }: { net: Net; rows: R
           { label: "Check-ins", run: () => offer(scriptCheckin(net.ncs)) },
           { label: "ZKS", run: () => offer(scriptZks(net)) },
           { label: "Close", run: () => offer(scriptClose(net.ncs)) },
+          { label: "Traffic report", title: "Who has each file, and who still needs it by Winlink", run: () => offer(trafficCloseout(net)) },
           { label: "IMI", run: () => {
             const last = [...net.zks].reverse()[0];
             if (last) offer(scriptImi(net.ncs, last));
@@ -886,12 +904,6 @@ function RoleSteps({ net, rows, canOpen, offer, blockOpen }: { net: Net; rows: R
     );
   }
   if (net.role === "operator") {
-    const group = () => {
-      if (!rows) return null;
-      const chal = challengeFrom(rows);
-      const ans = chal ? authenticate(rows, chal[0], chal[1]) : null;
-      return chal && ans ? `${chal}${ans}` : null;
-    };
     return (
       <LineButtons
         key="operator"
@@ -899,25 +911,24 @@ function RoleSteps({ net, rows, canOpen, offer, blockOpen }: { net: Net; rows: R
         hint={net.ncsProof === "unknown"
           ? "Wait for net control to open with ZKA ZNB and three letters. Paste that line and Read it before you follow."
           : "Check in, then stay silent until net control calls you."}
-        items={[
-          { label: "ZKE + ZNB", run: () => { if (callReady()) offer(operatorCheckin(net.ncs, net.myCall, "RF", group())); } },
-          { label: "ZKE only", run: () => { if (callReady()) offer(operatorCheckin(net.ncs, net.myCall, "RF", null)); } },
-          { label: "ZUG ZNB", run: () => { if (callReady()) offer(`${net.ncs} DE ${net.myCall} ZUG ZNB K`); } },
-          { label: "ZEV", run: () => { if (callReady()) offer(operatorZev(net.ncs, net.myCall, false)); } },
-          { label: "ZUG ZEV", run: () => { if (callReady()) offer(operatorZev(net.ncs, net.myCall, true)); } },
-          ...own,
-        ]}
+        items={[...checkin, ...own]}
       />
     );
   }
   if (net.role === "wl2k") {
+    const withList = checkin.map((item) =>
+      item.label === "ZKE + ZNB"
+        ? { ...item, run: () => { if (callReady()) offer(scriptGatewayCheckin(net.ncs, net.myCall, group(), net.gateway)); } }
+        : item);
     return (
       <LineButtons
         key="wl2k"
-        title="Winlink"
-        hint="Before the net, check OPIN@winlink.org for ZKE messages. Paste them below, acknowledge, and they join the roll as CALL/WL2K."
+        title="WL2K-GO"
+        hint="ZKE + ZNB writes your triplet, then WL2K ZKE and each station below as CALL/WL2K, then QRU. ZKE only is just ZKE, for coming back from another frequency."
         items={[
+          ...withList,
           { label: "Gateway message", run: () => offer(gatewayMessage(net)) },
+          { label: "Traffic report", title: "Who has each file, and who still needs it by Winlink", run: () => offer(trafficCloseout(net)) },
           ...own,
         ]}
       />
@@ -930,7 +941,9 @@ function RoleSteps({ net, rows, canOpen, offer, blockOpen }: { net: Net; rows: R
       hint="Check in as CALL/IP. List a file with ZBO when net control calls for traffic."
       items={[
         { label: "Check in as IP", run: () => { if (callReady()) offer(operatorCheckin(net.ncs, net.myCall, "IP", null)); } },
+        { label: "ZKE only", title: "Back from another frequency. Nothing after ZKE.", run: () => { if (callReady()) offer(`${net.ncs} DE ${net.myCall} ZKE K`); } },
         { label: "ZEV", run: () => { if (callReady()) offer(operatorZev(net.ncs, net.myCall, false)); } },
+        { label: "ZUG ZEV", run: () => { if (callReady()) offer(operatorZev(net.ncs, net.myCall, true)); } },
         ...own,
       ]}
     />
@@ -1164,8 +1177,36 @@ function WinlinkBox({
   setPaste: (v: string) => void;
   offer: (text: string) => void;
 }) {
+  const [call, setCall] = useState("");
+  function addCalls() {
+    const next = addGatewayCalls(net, call);
+    if (next === net) return;
+    setNet(next);
+    setCall("");
+  }
   return (
     <div className="mt-4">
+      <h3 className="mb-1 text-sm font-semibold">Checked in via Winlink</h3>
+      <p className="mb-2 text-xs text-muted">These go after the second ZKE: WL2K ZKE CALL/WL2K CALL/WL2K QRU K.</p>
+      <div className="mb-2 flex flex-wrap items-center gap-1">
+        <input
+          className="field mono w-48 uppercase"
+          value={call}
+          placeholder="WD8NDS N8SDF"
+          onChange={(e) => setCall(e.target.value.toUpperCase())}
+          onKeyDown={(e) => { if (e.key === "Enter") addCalls(); }}
+        />
+        <button className="btn btn-xs" type="button" onClick={addCalls}>Add</button>
+      </div>
+      {net.gateway.length === 0 && <p className="mb-3 text-xs text-muted">No Winlink check-ins yet.</p>}
+      <ul className="mb-3">
+        {net.gateway.map((item) => (
+          <li key={item} className="flex items-center gap-2 border-b border-line py-0.5">
+            <span className="mono text-xs">{item}/WL2K</span>
+            <button className="btn btn-xs" type="button" onClick={() => setNet(removeGatewayCall(net, item))}>Remove</button>
+          </li>
+        ))}
+      </ul>
       <h3 className="mb-2 text-sm font-semibold">Pre-net Winlink</h3>
       <textarea className="field mono mb-2 h-24" value={paste} onChange={(e) => setPaste(e.target.value)} placeholder="N8TAG DE W8ABC/WL2K ZKE K" />
       <button className="btn mb-3" type="button" onClick={() => { if (paste.trim()) { setNet(addInbox(net, paste)); setPaste(""); } }}>Save message</button>

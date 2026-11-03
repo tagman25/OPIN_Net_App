@@ -20,7 +20,7 @@ If you are not net control, the NCS call stays blank until the desk reads an aut
 - **Net control** opens with `ZKA ZNB` and a DRYAD triplet, so every station can check that this is the real NCS. Then take check-ins, keep the ZKS roll, call for traffic, send files, and close the net.
 - **Operator** checks in, lists traffic, and stays silent until called. Answer ZEV or ZUG ZEV when a file is sent to you.
 - **IP** checks in as `CALL/IP` and lists files with ZBO when net control calls for traffic.
-- **Winlink** pastes the pre-net messages from OPIN@winlink.org, puts those stations on the roll as `CALL/WL2K`, and writes the gateway summary.
+- **WL2K-GO** checks in with its own triplet, then on the same line sends `WL2K ZKE` and each station that checked in by Winlink as `CALL/WL2K`, ending with QRU. Enter those calls on the desk before you build the line. Pre-net messages from OPIN@winlink.org can still be pasted below.
 
 Net control's lines are small buttons. Every role also has **ZKJ** (this station is closing down) and **ZCJ** (equipment trouble).
 

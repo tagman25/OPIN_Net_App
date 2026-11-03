@@ -128,6 +128,8 @@ export type Net = {
   ncsProofNote: string;
   ncsTriplet: string | null;
   ncsTripletOk: boolean | null;
+  /** Stations the gateway operator will check in after its own ZKE, as CALL/WL2K. */
+  gateway: string[];
 };
 
 export const CHANNELS = [
@@ -192,6 +194,7 @@ export function emptyNet(ncs = "N8TAG"): Net {
     ncsProofNote: "",
     ncsTriplet: null,
     ncsTripletOk: null,
+    gateway: [],
   };
 }
 
@@ -228,6 +231,9 @@ export function normalizeNet(raw: Partial<Net> | null | undefined): Net {
   base.done = Array.isArray(raw?.done) ? raw.done.map((item) => asPieces(item as Partial<Traffic> & { quantity?: number })) : [];
   base.qsos = Array.isArray(raw?.qsos) ? raw.qsos : [];
   base.stations = (base.stations ?? []).map((s) => ({ ...s, relay: s.relay ?? false, closeAsk: s.closeAsk ?? false, zksAhead: s.zksAhead ?? null }));
+  base.gateway = Array.isArray(raw?.gateway)
+    ? raw.gateway.map((call) => call.toUpperCase().split("/")[0].replace(/[^A-Z0-9]/g, "")).filter((call) => CALL.test(call))
+    : [];
   return base;
 }
 
@@ -393,6 +399,24 @@ function detectMethod(text: string): Method {
   if (text.includes("/WL2K") || /\bWL2K\b/.test(text)) return "WL2K";
   if (/\bZKE\b/.test(text) && /\bIP\b/.test(text)) return "IP";
   return "RF";
+}
+
+/** `ZKE ZNB ABC WL2K ZKE CALL/WL2K ...` is the gateway operator, then the Winlink stations. */
+function gatewayList(text: string): string[] | null {
+  const tokens = text.split(" ");
+  const first = tokens.indexOf("ZKE");
+  if (first < 0) return null;
+  const mark = tokens.indexOf("WL2K", first + 1);
+  if (mark < 0 || tokens[mark + 1] !== "ZKE") return null;
+  const calls: string[] = [];
+  for (let i = mark + 2; i < tokens.length; i++) {
+    const token = tokens[i].replace(/[.,]/g, "");
+    if (token === "QRU" || token === "K" || token === "AR" || token === "AS") break;
+    const [call, suffix] = token.split("/");
+    if (suffix !== "WL2K" || !CALL.test(call)) break;
+    if (!calls.includes(call)) calls.push(call);
+  }
+  return calls;
 }
 
 function qsyRoger(text: string): boolean {
@@ -910,6 +934,32 @@ export function operatorCheckin(ncs: string, me: string, method: Method, group: 
   return `${ncs} DE ${me} ZKE${znb} K`;
 }
 
+/** Own check-in, then WL2K ZKE and each CALL/WL2K, then QRU. */
+export function scriptGatewayCheckin(ncs: string, me: string, group: string | null, calls: string[]): string {
+  const own = operatorCheckin(ncs, me, "RF", group).replace(/ K$/, "");
+  const mine = me.toUpperCase().split("/")[0];
+  const list = [...new Set(calls.map((call) => call.toUpperCase().split("/")[0]).filter((call) => CALL.test(call) && call !== mine))];
+  if (!list.length) return `${own} K`;
+  return `${own} WL2K ZKE ${list.map((call) => `${call}/WL2K`).join(" ")} QRU K`;
+}
+
+export function addGatewayCalls(net: Net, raw: string): Net {
+  const mine = net.myCall.split("/")[0];
+  const found = raw
+    .toUpperCase()
+    .split(/[^A-Z0-9/]+/)
+    .map((token) => token.split("/")[0].replace(/[^A-Z0-9]/g, ""))
+    .filter((call) => CALL.test(call) && call !== mine && call !== net.ncs);
+  if (!found.length) return net;
+  const gateway = [...net.gateway];
+  for (const call of found) if (!gateway.includes(call)) gateway.push(call);
+  return { ...net, gateway };
+}
+
+export function removeGatewayCall(net: Net, call: string): Net {
+  return { ...net, gateway: net.gateway.filter((item) => item !== call) };
+}
+
 export function operatorZev(ncs: string, me: string, negative: boolean) {
   return `${ncs} DE ${me} ${negative ? "ZUG ZEV" : "ZEV"} AR`;
 }
@@ -1040,11 +1090,20 @@ export function interpret(net: Net, raw: string, rows: Rows | null, ncsMode: boo
       net = addZks(net, speaker, "ZUG ZNB");
       suggestion = ncsMode ? scriptJoinAck(net, speaker) : null;
     } else if (text.includes("ZKE") && !text.includes("INT")) {
-      net = upsert(log(net, `${speaker} checked in (${method})`, speaker), speaker, method);
-      net = patch(net, speaker, { method });
+      const listed = gatewayList(text);
+      const checkMethod = listed ? "RF" : method;
+      net = upsert(log(net, `${speaker} checked in (${checkMethod})`, speaker), speaker, checkMethod);
+      net = patch(net, speaker, { method: checkMethod });
       const group = znbGroup(text);
       if (group && group.length === 3) net = patch(net, speaker, { volunteered: group });
-      if (method === "WL2K") {
+      if (listed) {
+        for (const call of listed) {
+          net = upsert(net, call, "WL2K");
+          net = patch(net, call, { method: "WL2K", exempt: true, pending: false });
+          net = addZks(net, call, "Winlink check-in");
+        }
+      }
+      if (checkMethod === "WL2K") {
         net = patch(net, speaker, { exempt: true, pending: false, method: "WL2K" });
         net = addZks(net, speaker, "Winlink check-in");
         suggestion = ncsMode ? ack(ncs, speaker) : null;
@@ -1367,6 +1426,58 @@ export function gatewayMessage(net: Net): string {
   const bounced = net.inbox.filter((m) => m.bounce).map((m) => m.from);
   lines.push("", `Bounces: ${bounced.join(" ") || "none"}`, `Groups: ${GROUPS.join(" ")}`);
   return lines.join("\n");
+}
+
+/** Suffix of the call, at least two characters. N8ADO is ADO. NE8U is 8U. */
+export function shortCall(call: string): string {
+  const clean = call.toUpperCase().split("/")[0];
+  const match = clean.match(/^[A-Z]{1,2}(\d+)([A-Z]+)$/);
+  if (!match) return clean;
+  const [, digits, suffix] = match;
+  return suffix.length >= 2 ? suffix : `${digits}${suffix}`;
+}
+
+function shortNames(calls: string[]): Map<string, string> {
+  const map = new Map(calls.map((call) => [call, shortCall(call)]));
+  const owners = new Map<string, string[]>();
+  for (const [call, name] of map) owners.set(name, [...(owners.get(name) ?? []), call]);
+  for (const [name, list] of owners) {
+    if (list.length < 2) continue;
+    for (const call of list) {
+      const match = call.toUpperCase().match(/(\d+)([A-Z]+)$/);
+      map.set(call, match && `${match[1]}${match[2]}` !== name ? `${match[1]}${match[2]}` : call);
+    }
+  }
+  return map;
+}
+
+/** End-of-net traffic: who still needs each file by Winlink, and who already has it. */
+export function trafficCloseout(net: Net): string {
+  const involved = new Set<string>();
+  for (const item of net.transfers) {
+    if (item.originator) involved.add(item.originator);
+    for (const call of fileViaWl2k(net, item)) involved.add(call);
+    for (const row of transferRoster(net, item)) {
+      if (row.report?.status === "have") involved.add(row.call);
+    }
+  }
+  const names = shortNames([...involved]);
+  const nameOf = (call: string) => names.get(call) ?? shortCall(call);
+  const zug: string[] = [];
+  const zev: string[] = [];
+  for (const item of net.transfers) {
+    if (!item.originator) continue;
+    const fileBits = [item.hash, item.file && item.file !== "Unassigned" ? item.file : ""].filter(Boolean);
+    const zbo = [`ZBO`, `1`, item.listing ?? "", ...fileBits].filter(Boolean).join(" ");
+    const tail = `DE ${nameOf(item.originator)} ${zbo}`;
+    const via = fileViaWl2k(net, item);
+    if (via.length) zug.push(`\t${via.map(nameOf).join(" ")} ${tail}`);
+    const got = transferRoster(net, item)
+      .filter((row) => row.report?.status === "have" && !via.includes(row.call))
+      .map((row) => row.call);
+    if (got.length) zev.push(`\t${got.map(nameOf).join(" ")} ${tail}`);
+  }
+  return ["INT ZUG ZEV", ...zug, "", "ZEV", ...zev].join("\n");
 }
 
 export function sessionReport(net: Net): string {
