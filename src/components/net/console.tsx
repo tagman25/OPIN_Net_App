@@ -160,6 +160,9 @@ export function Console() {
   const [fileFolder, setFileFolder] = useState("Incoming");
   const [flamp, setFlamp] = useState("");
   const [pendingRole, setPendingRole] = useState<Role | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const deskRef = useRef({ net, rows: null as Rows | null, usingTraining: false, forceTraining: false });
+  const rxTail = useRef("");
 
   useEffect(() => {
     const loaded = loadNet();
@@ -193,6 +196,7 @@ export function Console() {
   const table: DryadDay | null = forceTraining ? training : storedDay ?? (days.length ? null : training);
   const rows: Rows | null = table?.rows ?? null;
   const usingTraining = Boolean(table?.training);
+  deskRef.current = { ...deskRef.current, net, rows, usingTraining, forceTraining };
 
   function offer(text: string) {
     setDraft(text);
@@ -224,10 +228,21 @@ export function Console() {
   }
 
   function readRx(block = rx) {
-    const trustKey = Boolean(rows) && (!usingTraining || forceTraining);
-    const result = ingest(net, block, rows, net.role === "ncs", trustKey);
+    const desk = deskRef.current;
+    const trustKey = Boolean(desk.rows) && (!desk.usingTraining || desk.forceTraining);
+    const result = ingest(desk.net, block, desk.rows, desk.net.role === "ncs", trustKey);
+    deskRef.current = { ...desk, net: result.net };
     setNet(result.net);
     if (result.suggestion) setDraft(result.suggestion);
+  }
+
+  function takeLive(chunk: string) {
+    setRx((prev) => `${prev}${chunk}`);
+    rxTail.current += chunk;
+    const parts = rxTail.current.split(/\r?\n/);
+    rxTail.current = parts.pop() ?? "";
+    const block = parts.join("\n");
+    if (block.trim()) readRx(block);
   }
 
   function practice() {
@@ -264,8 +279,6 @@ export function Console() {
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
   }
-
-  const fileRef = useRef<HTMLInputElement>(null);
 
   function applyDryad(text: string, lead: string[]) {
     const parsed = parseDryadText(text);
@@ -448,6 +461,7 @@ export function Console() {
               </p>
             )}
             <h2 className="mb-2 text-sm font-semibold">What fldigi printed</h2>
+            <LiveLink onText={takeLive} onCatchup={(text) => { if (text.trim()) { setRx((prev) => (prev ? `${text}\n${prev}` : text)); readRx(text); } }} />
             <MarkedText value={rx} onChange={setRx} tall placeholder="N8TAG DE KE8YTX ZKE ZNB ABC K" />
             <div className="mb-4 flex flex-wrap gap-2">
               <button className="btn btn-accent" type="button" onClick={() => readRx()}>Read this</button>
@@ -1319,6 +1333,84 @@ function IpBox({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+type LinkState = {
+  fldigi: "down" | "up";
+  flamp: "down" | "up";
+  flrig: "down" | "up";
+  frequency: string;
+  mode: string;
+  modem: string;
+  radio: string;
+  note: string;
+  file: string;
+};
+
+type NbemsBridge = {
+  start: (opts: { fldigiPort: number; flrigPort: number }) => Promise<LinkState>;
+  stop: () => Promise<unknown>;
+  catchUp: () => Promise<string>;
+  onRx: (fn: (text: string) => void) => () => void;
+  onStatus: (fn: (status: LinkState) => void) => () => void;
+};
+
+function bridge(): NbemsBridge | null {
+  if (typeof window === "undefined") return null;
+  return (window as unknown as { nbems?: NbemsBridge }).nbems ?? null;
+}
+
+function LiveLink({ onText, onCatchup }: { onText: (text: string) => void; onCatchup: (text: string) => void }) {
+  const live = bridge();
+  const [follow, setFollow] = useState(Boolean(live));
+  const [fldigiPort, setFldigiPort] = useState(7362);
+  const [flrigPort, setFlrigPort] = useState(12345);
+  const [status, setStatus] = useState<LinkState>({
+    fldigi: "down", flamp: "down", flrig: "down", frequency: "", mode: "", modem: "", radio: "", note: "", file: "",
+  });
+  const onTextRef = useRef(onText);
+  onTextRef.current = onText;
+
+  useEffect(() => {
+    const link = bridge();
+    if (!link || !follow) {
+      void link?.stop();
+      return;
+    }
+    void link.start({ fldigiPort, flrigPort });
+    const stopRx = link.onRx((text) => onTextRef.current(text));
+    const stopStatus = link.onStatus(setStatus);
+    return () => {
+      stopRx();
+      stopStatus();
+      void link.stop();
+    };
+  }, [follow, fldigiPort, flrigPort]);
+
+  if (!live) {
+    return <p className="mb-2 text-xs text-muted">Paste what fldigi printed, then Read this. The desktop program can also read fldigi, flamp, and flrig directly.</p>;
+  }
+  const mark = (up: boolean) => (up ? "text-ok" : "text-muted");
+  return (
+    <div className="mb-2 rounded-md border border-line px-2 py-1.5 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1">
+          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Follow live
+        </label>
+        <span className={mark(status.fldigi === "up")}>fldigi {status.fldigi === "up" ? status.modem || "on" : "off"}</span>
+        <span className={mark(status.flamp === "up")}>flamp {status.flamp === "up" ? "rx folder" : "no folder"}</span>
+        <span className={mark(status.flrig === "up")}>flrig {status.flrig === "up" ? [status.radio, status.frequency, status.mode].filter(Boolean).join(" ") : "off"}</span>
+        <label className="text-muted">fldigi
+          <input className="field field-xs ml-1 w-16" inputMode="numeric" value={fldigiPort} onChange={(e) => setFldigiPort(Number(e.target.value.replace(/\D/g, "")) || 7362)} />
+        </label>
+        <label className="text-muted">flrig
+          <input className="field field-xs ml-1 w-16" inputMode="numeric" value={flrigPort} onChange={(e) => setFlrigPort(Number(e.target.value.replace(/\D/g, "")) || 12345)} />
+        </label>
+        <button className="btn btn-xs" type="button" onClick={() => { void bridge()?.catchUp().then(onCatchup); }}>Read screen</button>
+      </div>
+      <p className="mt-1 text-muted">Reads only. Nothing is sent to the radio. FLAMP blocks still arrive in the fldigi window, and a finished file is noted from the FLAMP receive folder.{status.file ? ` Latest file: ${status.file}.` : ""}</p>
     </div>
   );
 }
