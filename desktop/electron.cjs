@@ -21,12 +21,14 @@ function createWindow() {
   ipcMain.removeHandler("nbems:start");
   ipcMain.removeHandler("nbems:stop");
   ipcMain.removeHandler("nbems:catchup");
+  ipcMain.removeHandler("nbems:queue-tx");
   ipcMain.handle("nbems:start", (_event, opts) => bridge.start(opts));
   ipcMain.handle("nbems:stop", () => {
     bridge.stop();
     return true;
   });
   ipcMain.handle("nbems:catchup", () => bridge.catchUp());
+  ipcMain.handle("nbems:queue-tx", (_event, payload) => bridge.queueTx(payload?.fldigiPort, payload?.text));
   win.on("closed", () => bridge.stop());
   win.loadFile(path.join(__dirname, "dist", "index.html"));
 }

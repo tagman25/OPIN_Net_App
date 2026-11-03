@@ -138,7 +138,20 @@ function createBridge(win) {
       const text = await callXmlRpc(opts.fldigiPort, "text.get_rx", [0, end]);
       return String(text ?? "");
     },
+    queueTx(port, text) {
+      return queueFldigiTx(port, text);
+    },
   };
 }
 
-module.exports = { createBridge, formatHz, flampDirs };
+async function queueFldigiTx(port, text) {
+  const fldigiPort = Number(port);
+  if (!Number.isInteger(fldigiPort) || fldigiPort < 1 || fldigiPort > 65535) throw new Error("bad fldigi port");
+  const line = String(text ?? "").replace(/\r\n/g, "\n");
+  if (!line.trim()) return false;
+  const payload = line.endsWith("\n") ? line : `${line}\n`;
+  await callXmlRpc(fldigiPort, "text.add_tx", [payload]);
+  return true;
+}
+
+module.exports = { createBridge, formatHz, flampDirs, queueFldigiTx };

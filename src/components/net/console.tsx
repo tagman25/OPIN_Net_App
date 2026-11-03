@@ -142,7 +142,8 @@ export function Console() {
   const [view, setView] = useState<View>("desk");
   const [rx, setRx] = useState("");
   const [draft, setDraft] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"" | "in" | "clip" | "off">("");
+  const fldigiPortRef = useRef(7362);
   const [dryadPaste, setDryadPaste] = useState("");
   const [dryadNotes, setDryadNotes] = useState<string[]>([]);
   const [query, setQuery] = useState("");
@@ -274,10 +275,26 @@ export function Console() {
   }
 
   async function copyDraft() {
-    if (!draft) return;
+    if (!draft.trim()) return;
+    const link = bridge();
+    if (link?.queueTx) {
+      try {
+        await link.queueTx({ fldigiPort: fldigiPortRef.current, text: draft });
+        setCopied("in");
+        setTimeout(() => setCopied(""), 1600);
+        return;
+      } catch {
+        try {
+          await navigator.clipboard.writeText(draft);
+        } catch { /* fldigi is down and the clipboard may be blocked */ }
+        setCopied("off");
+        setTimeout(() => setCopied(""), 1600);
+        return;
+      }
+    }
     await navigator.clipboard.writeText(draft);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
+    setCopied("clip");
+    setTimeout(() => setCopied(""), 1200);
   }
 
   function applyDryad(text: string, lead: string[]) {
@@ -351,7 +368,7 @@ export function Console() {
           </p>
           <h1 className="text-2xl font-semibold tracking-tight">Net assistant</h1>
           <p className="mt-1 max-w-xl text-sm text-muted">
-            Suggestions stay on this page until you copy them into fldigi. Nothing is transmitted from here.
+            Suggestions stay on this page until you put them in fldigi. Copy for fldigi writes the line into the blue box. It does not start the transmission.
           </p>
         </div>
         <div className="flex flex-col items-start gap-2 sm:items-end">
@@ -461,16 +478,16 @@ export function Console() {
               </p>
             )}
             <h2 className="mb-2 text-sm font-semibold">What fldigi printed</h2>
-            <LiveLink onText={takeLive} onCatchup={(text) => { if (text.trim()) { setRx((prev) => (prev ? `${text}\n${prev}` : text)); readRx(text); } }} />
+            <LiveLink portRef={fldigiPortRef} onText={takeLive} onCatchup={(text) => { if (text.trim()) { setRx((prev) => (prev ? `${text}\n${prev}` : text)); readRx(text); } }} />
             <MarkedText value={rx} onChange={setRx} tall placeholder="N8TAG DE KE8YTX ZKE ZNB ABC K" />
             <div className="mb-4 flex flex-wrap gap-2">
               <button className="btn btn-accent" type="button" onClick={() => readRx()}>Read this</button>
               <button className="btn" type="button" onClick={practice}>Practice net</button>
             </div>
-            <h2 className="mb-2 text-sm font-semibold">Suggested reply — edit, then copy</h2>
-            <MarkedText value={draft} onChange={setDraft} placeholder="The line to copy into fldigi" />
-            <button className="btn btn-accent" type="button" onClick={copyDraft}>
-              <ClipboardCopy size={16} className="mr-1 inline" /> {copied ? "Copied" : "Copy for fldigi"}
+            <h2 className="mb-2 text-sm font-semibold">Suggested reply — edit, then put in fldigi</h2>
+            <MarkedText value={draft} onChange={setDraft} placeholder="The line to put in fldigi" />
+            <button className="btn btn-accent" type="button" disabled={!draft.trim()} onClick={copyDraft}>
+              <ClipboardCopy size={16} className="mr-1 inline" /> {copied === "in" ? "In the blue box" : copied === "off" ? "Copied — fldigi off" : copied === "clip" ? "Copied" : "Copy for fldigi"}
             </button>
 
             {net.role === "wl2k" && <WinlinkBox net={net} setNet={setNet} paste={inboxPaste} setPaste={setInboxPaste} offer={offer} />}
@@ -1353,6 +1370,7 @@ type NbemsBridge = {
   start: (opts: { fldigiPort: number; flrigPort: number }) => Promise<LinkState>;
   stop: () => Promise<unknown>;
   catchUp: () => Promise<string>;
+  queueTx: (opts: { fldigiPort: number; text: string }) => Promise<boolean>;
   onRx: (fn: (text: string) => void) => () => void;
   onStatus: (fn: (status: LinkState) => void) => () => void;
 };
@@ -1362,10 +1380,11 @@ function bridge(): NbemsBridge | null {
   return (window as unknown as { nbems?: NbemsBridge }).nbems ?? null;
 }
 
-function LiveLink({ onText, onCatchup }: { onText: (text: string) => void; onCatchup: (text: string) => void }) {
+function LiveLink({ onText, onCatchup, portRef }: { onText: (text: string) => void; onCatchup: (text: string) => void; portRef: { current: number } }) {
   const live = bridge();
   const [follow, setFollow] = useState(Boolean(live));
   const [fldigiPort, setFldigiPort] = useState(7362);
+  portRef.current = fldigiPort;
   const [flrigPort, setFlrigPort] = useState(12345);
   const [status, setStatus] = useState<LinkState>({
     fldigi: "down", flamp: "down", flrig: "down", frequency: "", mode: "", modem: "", radio: "", note: "", file: "",
@@ -1410,7 +1429,7 @@ function LiveLink({ onText, onCatchup }: { onText: (text: string) => void; onCat
         </label>
         <button className="btn btn-xs" type="button" onClick={() => { void bridge()?.catchUp().then(onCatchup); }}>Read screen</button>
       </div>
-      <p className="mt-1 text-muted">Reads only. Nothing is sent to the radio. FLAMP blocks still arrive in the fldigi window, and a finished file is noted from the FLAMP receive folder.{status.file ? ` Latest file: ${status.file}.` : ""}</p>
+      <p className="mt-1 text-muted">Follow live only reads. Copy for fldigi adds the reply to the blue box and does not key the radio. FLAMP blocks still arrive in the fldigi window.{status.file ? ` Latest file: ${status.file}.` : ""}</p>
     </div>
   );
 }

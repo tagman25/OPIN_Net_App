@@ -2,15 +2,15 @@
 
 A local desk for an OPIN digital net run with fldigi, flamp, flmsg, and Winlink.
 
-The app does not transmit. In the desktop program it reads fldigi, flamp, and flrig on this computer. You can still paste what fldigi printed. When it is your turn, it puts the next line in Suggested reply. Copy that line into fldigi and send it yourself.
+The app does not transmit. In the desktop program it reads fldigi, flamp, and flrig on this computer. You can still paste what fldigi printed. When it is your turn, it puts the next line in Suggested reply. Copy for fldigi writes that line, including your edits, into fldigi's blue box. You send it yourself.
 
 The session stays in this program. Export JSON if you want a copy.
 
 ## fldigi, flamp, and flrig
 
-The desktop program only reads. It never sends.
+The desktop program reads the radio programs. Copy for fldigi writes the suggested line into fldigi's blue transmit box. It does not press TX.
 
-- **fldigi**, normally `127.0.0.1:7362`. Follow live takes new text from the receive window and reads it the same way as Read this. Read screen brings in what was already showing when the program attached. The read uses `text.get_rx`, so flamp keeps its own copy of the stream.
+- **fldigi**, normally `127.0.0.1:7362`. Follow live takes new text from the receive window and reads it the same way as Read this. Read screen brings in what was already showing when the program attached. The read uses `text.get_rx`, so flamp keeps its own copy of the stream. Copy for fldigi uses `text.add_tx` and does not call transmit.
 - **flamp** prints its blocks and reports in the fldigi window, and the desk reads them from there. A finished file is also noted from the FLAMP receive folder.
 - **flrig**, normally port `12345`. The desk shows the radio, the frequency, and the mode. It does not move the dial.
 
