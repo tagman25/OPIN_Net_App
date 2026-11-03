@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
   BookOpen,
   ClipboardCopy,
@@ -55,6 +55,7 @@ import {
   pendingCalls,
   pieceText,
   removeOutbound,
+  reorderZks,
   requestAuth,
   scriptAgency,
   removeGatewayCall,
@@ -436,7 +437,12 @@ export function Console() {
       {view === "desk" && (
         <div className="grid gap-3 lg:grid-cols-12">
           <section className="panel p-2 lg:col-span-4">
-            <h2 className="mb-1 text-sm font-semibold">ZKS roll</h2>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold">ZKS roll</h2>
+              {net.role === "ncs" && (
+                <button className="btn btn-xs" type="button" title="Same as the ZKS line under Net control" onClick={() => offer(scriptZks(net))}>ZKS</button>
+              )}
+            </div>
             <ZksRoll net={net} />
             <RollList
               net={net}
@@ -816,6 +822,34 @@ function RollList({
   const air = onAir(net);
   const wl = wl2kStations(net);
   const away = awayStations(net);
+  const reorder = net.role === "ncs";
+  const [dragCall, setDragCall] = useState<string | null>(null);
+  const [overCall, setOverCall] = useState<string | null>(null);
+
+  function dropOn(target: string, event: DragEvent) {
+    event.preventDefault();
+    const from = event.dataTransfer.getData("text/plain") || dragCall;
+    if (from) setNet(reorderZks(net, from, target));
+    setDragCall(null);
+    setOverCall(null);
+  }
+
+  function grip(call: string) {
+    if (!reorder) return null;
+    return (
+      <span
+        draggable
+        title="Drag to move this station"
+        className="cursor-grab select-none px-0.5 text-sm leading-none text-muted active:cursor-grabbing"
+        onDragStart={(event) => {
+          event.dataTransfer.setData("text/plain", call);
+          event.dataTransfer.effectAllowed = "move";
+          setDragCall(call);
+        }}
+        onDragEnd={() => { setDragCall(null); setOverCall(null); }}
+      >↕</span>
+    );
+  }
 
   return (
     <div className="max-h-[32rem] overflow-auto">
@@ -846,7 +880,13 @@ function RollList({
           const ack = scriptJoinAck(net, s.call);
           const placeLabel = ack.endsWith(" R") ? "R" : `ZGO ${ack.split(" ").pop()}`;
           return (
-            <li key={s.call} className="flex flex-wrap items-center gap-1 border-b border-line py-0.5">
+            <li
+              key={s.call}
+              className={`flex flex-wrap items-center gap-1 border-b border-line py-0.5 ${overCall === s.call ? "bg-surface-2" : ""} ${dragCall === s.call ? "opacity-50" : ""}`}
+              onDragOver={(event) => { if (!reorder) return; event.preventDefault(); if (dragCall !== s.call) setOverCall(s.call); }}
+              onDrop={(event) => dropOn(s.call, event)}
+            >
+              {grip(s.call)}
               <button type="button" className="mono text-left text-xs" onClick={() => onCall(s.call)}>
                 {s.method === "IP" ? `${s.call}/IP` : s.call}
                 <Triplet value={s.volunteered} ok={s.volunteered ? s.authenticated : null} />
@@ -866,9 +906,14 @@ function RollList({
           );
         })}
         {wl.map((s) => (
-          <li key={s.call} className="flex flex-wrap items-center gap-1 border-b border-line py-0.5">
+          <li
+            key={s.call}
+            className={`flex flex-wrap items-center gap-1 border-b border-line py-0.5 ${overCall === s.call ? "bg-surface-2" : ""} ${dragCall === s.call ? "opacity-50" : ""}`}
+            onDragOver={(event) => { if (!reorder) return; event.preventDefault(); if (dragCall !== s.call) setOverCall(s.call); }}
+            onDrop={(event) => dropOn(s.call, event)}
+          >
+            {grip(s.call)}
             <span className="mono text-xs">{s.call}/WL2K</span>
-            <button className="btn btn-xs" type="button" onClick={() => offer(scriptCloseOne(net.ncs, s.call))}>ZKJ</button>
           </li>
         ))}
         {net.ncs ? (
@@ -1028,7 +1073,9 @@ function RoleSteps({ net, rows, canOpen, offer, blockOpen }: { net: Net; rows: R
 }
 
 function TrafficPanel({ net, setNet, offer }: { net: Net; setNet: (n: Net) => void; offer: (text: string) => void }) {
-  const [from, setFrom] = useState(() => (net.myCall || net.ncs).toUpperCase());
+  const mine = net.myCall.toUpperCase().slice(0, 10);
+  const [from, setFrom] = useState(mine);
+  useEffect(() => { setFrom(mine); }, [mine]);
   const [qty, setQty] = useState("1");
   const [prec, setPrec] = useState("R");
   const [dest, setDest] = useState("");

@@ -544,6 +544,28 @@ function addZks(net: Net, call: string, reason: string): Net {
   return log({ ...net, zks }, `${call} added to ZKS (${reason})`, call);
 }
 
+/** NCS slides a station to another station's place. On-air stays ahead of Winlink. */
+export function reorderZks(net: Net, call: string, before: string): Net {
+  if (!call || call === before || call === net.ncs || before === net.ncs) return net;
+  const moving = stationOf(net, call);
+  const target = stationOf(net, before);
+  if (!moving || !target || !net.zks.includes(call) || !net.zks.includes(before)) return net;
+  if ((moving.method === "WL2K") !== (target.method === "WL2K")) return net;
+  const air = onAir(net).map((s) => s.call);
+  const wl = wl2kStations(net).map((s) => s.call);
+  const list = moving.method === "WL2K" ? wl : air;
+  const from = list.indexOf(call);
+  const to = list.indexOf(before);
+  if (from < 0 || to < 0) return net;
+  const next = [...list];
+  const [item] = next.splice(from, 1);
+  if (!item) return net;
+  next.splice(to, 0, item);
+  const zks = moving.method === "WL2K" ? [...air, ...next] : [...next, ...wl];
+  if (zks.join(" ") === net.zks.join(" ")) return net;
+  return { ...net, zks };
+}
+
 function parseZksRoll(text: string): { call: string; method: Method }[] | null {
   const tokens = text.split(" ");
   const at = tokens.indexOf("ZKS");
