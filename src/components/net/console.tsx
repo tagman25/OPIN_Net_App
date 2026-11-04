@@ -35,17 +35,22 @@ import {
   awayStations,
   dismissTransfer,
   fileViaWl2k,
+  forceOnRoll,
   recallFromWl2k,
   sendViaWl2k,
   dismissQsy,
   directQsy,
   emptyNet,
   gatewayMessage,
+  ics214,
+  ics309,
   ingest,
   listFile,
   moveNetChannel,
   listOnNet,
   moveFile,
+  markFileZev,
+  markPieceZev,
   myPlace,
   normalizeNet,
   onAir,
@@ -77,6 +82,7 @@ import {
   scriptZks,
   scriptZof,
   scriptIntZev,
+  shortCall,
   sessionK2s,
   sessionReport,
   trafficCloseout,
@@ -118,8 +124,8 @@ function loadDays(): DryadDay[] {
   }
 }
 
-function download(name: string, text: string) {
-  const blob = new Blob([text], { type: "text/plain" });
+function download(name: string, text: string, type = "text/plain") {
+  const blob = new Blob([text], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -635,8 +641,12 @@ export function Console() {
           </ul>
           <div className="mt-3 flex flex-wrap gap-2">
             <button className="btn" type="button" onClick={() => download("OPIN-session-report.txt", sessionReport(net))}><Download size={16} className="mr-1 inline" /> Session report</button>
+            <button className="btn" type="button" onClick={() => download("OPIN-ICS-214.html", ics214(net), "text/html")}>ICS 214</button>
+            <button className="btn" type="button" onClick={() => download("OPIN-ICS-309.html", ics309(net), "text/html")}>ICS 309</button>
+            <button className="btn" type="button" onClick={() => download("OPIN-winlink-message.txt", gatewayMessage(net))}>Winlink message</button>
             <button className="btn" type="button" onClick={() => download("OPIN-session.k2s", sessionK2s(net))}>flmsg .k2s draft</button>
           </div>
+          <p className="mt-2 text-xs text-muted">ICS 214 and ICS 309 open in a browser. Print them when the net is done. The Winlink message is the text to paste into Winlink Express, Pat, or MacWinlink. Copy the To and Subject lines into those fields.</p>
         </section>
       )}
 
@@ -653,7 +663,7 @@ export function Console() {
             <p className="mb-2 text-sm text-muted">The session lives in this browser. Export it if you want a copy, or bring one back.</p>
             <div className="flex flex-wrap gap-2">
               <button className="btn" type="button" onClick={() => download("opin-session.json", JSON.stringify(net, null, 2))}>Export JSON</button>
-              <button className="btn" type="button" onClick={() => download("OPIN-gateway.txt", gatewayMessage(net))}>Gateway message</button>
+              <button className="btn" type="button" onClick={() => download("OPIN-winlink-message.txt", gatewayMessage(net))}>Winlink message</button>
               <label className="btn">
                 Import JSON
                 <input className="sr-only" type="file" accept="application/json,.json" onChange={async (e) => {
@@ -891,6 +901,7 @@ function RollList({
                     <button className="btn btn-xs" type="button" title="Authenticator was wrong. Give them a new challenge." onClick={() => znd(c)}>ZND 2</button>
                   )}
                   <button className="btn btn-xs" type="button" onClick={() => zug(c)}>ZUG ZNB</button>
+                  <button className="btn btn-xs ml-auto" type="button" title="Put this station on the ZKS roll even if the ZNB does not match" onClick={() => setNet(forceOnRoll(net, c))}>On roll</button>
                 </li>
               );
             })}
@@ -1093,7 +1104,7 @@ function RoleSteps({ net, rows, canOpen, offer, blockOpen }: { net: Net; rows: R
         hint="ZKE + ZNB writes your triplet, then WL2K ZKE and each station below as CALL/WL2K, then QRU. ZKE only is just ZKE, for coming back from another frequency."
         items={[
           ...withList,
-          { label: "Gateway message", run: () => offer(gatewayMessage(net)) },
+          { label: "Winlink message", title: "Gateway report for Winlink Express, Pat, or MacWinlink", run: () => offer(gatewayMessage(net)) },
           { label: "Traffic report", title: "Who has each file, and who still needs it by Winlink", run: () => offer(trafficCloseout(net)) },
           ...own,
         ]}
@@ -1209,17 +1220,45 @@ function TrafficPanel({ net, setNet, offer }: { net: Net; setNet: (n: Net) => vo
       )}
 
       <h3 className="mb-1 mt-4 text-sm font-medium">ZBO list</h3>
+      <p className="mb-1 text-xs text-muted">Select a station when that station has ZEV'd the piece. Select the same station again to clear it.</p>
       {net.traffic.length === 0 && <p className="text-xs text-muted">Nothing listed yet. A station stays off this list until net control says R. Net control's own listing goes on immediately.</p>}
       <ul>
         {net.traffic.map((item) => (
-          <li key={item.id} className="flex flex-wrap items-center gap-1 border-b border-line py-1">
-            <span className="mono text-xs">{item.originator} {pieceText(item.pieces)}</span>
-            {net.role === "ncs" && (
-              <>
-                <button className="btn btn-xs" type="button" onClick={() => { setNet(setTurn(net, item.originator)); offer(scriptZof(net.ncs, item.originator, item)); }}>ZOF</button>
-                <button className="btn btn-xs" type="button" onClick={() => openQsy(item.originator)}>QSY</button>
-              </>
-            )}
+          <li key={item.id} className="border-b border-line py-1">
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="mono text-xs">{item.originator} {pieceText(item.pieces)}</span>
+              {net.role === "ncs" && (
+                <>
+                  <button className="btn btn-xs" type="button" onClick={() => { setNet(setTurn(net, item.originator)); offer(scriptZof(net.ncs, item.originator, item)); }}>ZOF</button>
+                  <button className="btn btn-xs" type="button" onClick={() => openQsy(item.originator)}>QSY</button>
+                </>
+              )}
+            </div>
+            {item.pieces.map((piece, index) => {
+              const calls = [
+                ...onAir(net).map((s) => s.call),
+                ...wl2kStations(net).map((s) => s.call),
+                ...(net.ncs && net.ncs !== item.originator ? [net.ncs] : []),
+              ].filter((call, at, all) => call !== item.originator && all.indexOf(call) === at);
+              if (!calls.length) return null;
+              return (
+                <div key={`${item.id}-${index}`} className="mt-1 flex flex-wrap gap-1">
+                  <span className="mono text-xs text-muted">{piece.quantity} {piece.precedence} {piece.destinations.join(" ")}</span>
+                  {calls.map((call) => {
+                    const on = (piece.zev ?? []).includes(call);
+                    return (
+                      <button
+                        key={call}
+                        className={on ? "btn btn-xs btn-on" : "btn btn-xs"}
+                        type="button"
+                        title={on ? `${call} has this piece` : `Mark ${call} as ZEV for this piece`}
+                        onClick={() => setNet(markPieceZev(net, item.id, index, call))}
+                      >{shortCall(call)}{on ? " ZEV" : ""}</button>
+                    );
+                  })}
+                </div>
+              );
+            })}
           </li>
         ))}
       </ul>
@@ -1270,6 +1309,12 @@ function TrafficPanel({ net, setNet, offer }: { net: Net; setNet: (n: Net) => vo
                 {row.report?.status !== "have" && (
                   <button className="btn btn-xs btn-accent" type="button" onClick={() => offer(scriptIntZev(net.ncs || net.myCall, row.call, item.hash || item.file || "FILE"))}>INT ZEV</button>
                 )}
+                <button
+                  className={row.report?.status === "have" ? "btn btn-xs btn-on" : "btn btn-xs"}
+                  type="button"
+                  title={row.report?.status === "have" ? `Clear ZEV for ${row.call}` : `Mark ${row.call} as having this file`}
+                  onClick={() => setNet(markFileZev(net, item.id, row.call))}
+                >{row.report?.status === "have" ? "ZEV" : "Mark ZEV"}</button>
                 {(net.role === "ncs" || net.role === "wl2k") && row.report?.status !== "have" && (
                   <button className="btn btn-xs" type="button" onClick={() => setNet(sendViaWl2k(net, item.id, row.call))}>To WL2K</button>
                 )}

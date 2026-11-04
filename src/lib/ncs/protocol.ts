@@ -29,6 +29,8 @@ export type Piece = {
   quantity: number;
   precedence: string;
   destinations: string[];
+  /** Stations who have ZEV'd this piece. */
+  zev?: string[];
 };
 
 export type OutboundItem = Piece & { sender: string };
@@ -200,7 +202,11 @@ export function emptyNet(ncs = "N8TAG"): Net {
 
 function asPieces(item: Partial<Traffic> & { quantity?: number; precedence?: string; destination?: string }): Traffic {
   if (item.pieces?.length) {
-    return { id: item.id ?? 0, originator: item.originator ?? "", pieces: item.pieces };
+    return {
+      id: item.id ?? 0,
+      originator: item.originator ?? "",
+      pieces: item.pieces.map((p) => ({ ...p, destinations: p.destinations ?? [], zev: p.zev ?? [] })),
+    };
   }
   if (item.quantity) {
     return {
@@ -856,6 +862,53 @@ export function recallFromWl2k(net: Net, id: number, call: string): Net {
   };
 }
 
+/** Manual ZEV for one ZBO piece. Click again to clear it. */
+export function markPieceZev(net: Net, trafficId: number, pieceIndex: number, call: string): Net {
+  const clean = call.toUpperCase().split("/")[0];
+  if (!CALL.test(clean)) return net;
+  let note = "";
+  const traffic = net.traffic.map((item) => {
+    if (item.id !== trafficId) return item;
+    const pieces = item.pieces.map((piece, index) => {
+      if (index !== pieceIndex) return piece;
+      const zev = piece.zev ?? [];
+      const on = zev.includes(clean);
+      note = on
+        ? `${clean} ZEV cleared on ${piece.quantity} ${piece.precedence} ${piece.destinations.join(" ")}`
+        : `${clean} ZEV ${item.originator} ${piece.quantity} ${piece.precedence} ${piece.destinations.join(" ")}`;
+      return { ...piece, zev: on ? zev.filter((c) => c !== clean) : [...zev, clean] };
+    });
+    return { ...item, pieces };
+  });
+  if (!note) return net;
+  return log({ ...net, traffic }, note, clean);
+}
+
+/** Manual ZEV for one station on one file. Click again to clear it. */
+export function markFileZev(net: Net, id: number, call: string): Net {
+  const clean = call.toUpperCase().split("/")[0];
+  const item = net.transfers.find((t) => t.id === id);
+  if (!item || !CALL.test(clean) || clean === item.originator) return net;
+  const have = item.reports[clean]?.status === "have";
+  const reports = { ...item.reports };
+  if (have) delete reports[clean];
+  else reports[clean] = { status: "have", missing: [], preamble: false };
+  return log(
+    { ...net, transfers: net.transfers.map((t) => (t.id === id ? { ...t, reports } : t)) },
+    have ? `${clean} ZEV cleared on ${item.file}` : `${clean} ZEV on ${item.file}`,
+    clean,
+  );
+}
+
+/** Put a station on the roll without a matching ZNB. */
+export function forceOnRoll(net: Net, call: string): Net {
+  const clean = call.toUpperCase().split("/")[0].replace(/[^A-Z0-9]/g, "");
+  if (!CALL.test(clean) || clean === net.ncs || net.zks.includes(clean)) return net;
+  let next = upsert(net, clean, stationOf(net, clean)?.method ?? "RF");
+  next = patch(next, clean, { pending: false });
+  return addZks(next, clean, "manual, ZNB not required");
+}
+
 export function scriptOpen(ncs: string, rows: Rows | null): string | null {
   if (!rows) return null;
   const group = volunteerTriplet(rows);
@@ -1422,36 +1475,7 @@ export function listFile(net: Net, id: number): { net: Net; suggestion: string }
 }
 
 export function gatewayMessage(net: Net): string {
-  const lines = [
-    `OPIN gateway — ${net.ncs}`,
-    `Channel ${net.channel}  ${net.band}`,
-    "",
-    `ZKS ${zksLine(net)}`,
-    "",
-    "ZBO list:",
-  ];
-  const all = [...net.traffic, ...net.done];
-  if (!all.length) lines.push("(none listed)");
-  for (const t of all) lines.push(`${t.originator} ZBO ${pieceText(t.pieces)}`);
-  if (net.transfers.length) {
-    lines.push("", "Files:");
-    for (const t of net.transfers) {
-      lines.push(`${t.file}${t.hash ? ` {${t.hash}}` : ""}`);
-      const via = new Set(fileViaWl2k(net, t));
-      for (const row of transferRoster(net, t)) {
-        if (via.has(row.call)) continue;
-        if (!row.report) lines.push(`  ${row.call} not heard`);
-        else if (row.report.status === "have") lines.push(`  ${row.call} ZEV`);
-        else if (row.report.preamble) lines.push(`  ${row.call} missing preamble`);
-        else if (row.report.status === "none") lines.push(`  ${row.call} ZUG ZEV`);
-        else lines.push(`  ${row.call} missing ${row.report.missing.join(" ")}`);
-      }
-      if (via.size) lines.push(`  ${[...via].join(" ")} ZOF ZOK WL2K`);
-    }
-  }
-  const bounced = net.inbox.filter((m) => m.bounce).map((m) => m.from);
-  lines.push("", `Bounces: ${bounced.join(" ") || "none"}`, `Groups: ${GROUPS.join(" ")}`);
-  return lines.join("\n");
+  return winlinkMessage(net);
 }
 
 /** Suffix of the call, at least two characters. N8ADO is ADO. NE8U is 8U. */
@@ -1477,33 +1501,116 @@ function shortNames(calls: string[]): Map<string, string> {
   return map;
 }
 
-/** End-of-net traffic: who still needs each file by Winlink, and who already has it. */
+/** End-of-net traffic in the gateway format: who still needs each piece, then who has it. */
 export function trafficCloseout(net: Net): string {
-  const involved = new Set<string>();
+  const { zug, zev } = reportSections(net);
+  return ["INT ZUG ZEV", "", ...zug, "", "ZEV", "", ...zev].join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+/** DDHHmmJ MON YYYY in the computer's local time. J is local. */
+export function localDtg(iso: string): string {
+  const d = new Date(iso);
+  const when = Number.isNaN(d.getTime()) ? new Date() : d;
+  const dd = String(when.getDate()).padStart(2, "0");
+  const hh = String(when.getHours()).padStart(2, "0");
+  const mm = String(when.getMinutes()).padStart(2, "0");
+  return `${dd}${hh}${mm}J ${MONTHS[when.getMonth()]} ${when.getFullYear()}`;
+}
+
+function fileLabel(file: string): string {
+  if (!file || file === "Unassigned") return "";
+  return file.replace(/\.[^.]+$/, "");
+}
+
+type ReportRow = { calls: string[]; originator: string; zbo: string; tail: string; have: boolean };
+
+function reportRows(net: Net): ReportRow[] {
+  const rows: ReportRow[] = [];
   for (const item of net.transfers) {
-    if (item.originator) involved.add(item.originator);
-    for (const call of fileViaWl2k(net, item)) involved.add(call);
-    for (const row of transferRoster(net, item)) {
-      if (row.report?.status === "have") involved.add(row.call);
+    if (!item.originator) continue;
+    const file = fileLabel(item.file);
+    const listing = item.listing?.trim() ?? "";
+    const extra = file && !listing.includes(file) ? file : "";
+    const zbo = ["1", listing, extra].filter(Boolean).join(" ");
+    const via = fileViaWl2k(net, item);
+    const got = transferRoster(net, item)
+      .filter((row) => row.report?.status === "have" && !via.includes(row.call))
+      .map((row) => row.call);
+    if (via.length) rows.push({ calls: via, originator: item.originator, zbo, tail: "ZOK WL2K", have: false });
+    if (got.length) rows.push({ calls: got, originator: item.originator, zbo, tail: "", have: true });
+  }
+  const wl = wl2kStations(net).map((s) => s.call);
+  for (const item of net.traffic) {
+    for (const piece of item.pieces) {
+      const got = (piece.zev ?? []).filter((call) => call !== item.originator);
+      const need = wl.filter((call) => call !== item.originator && !got.includes(call));
+      const zbo = `${piece.quantity} ${piece.precedence} ${piece.destinations.join(" ")}`.trim();
+      if (need.length) rows.push({ calls: need, originator: item.originator, zbo, tail: "ZOK WL2K", have: false });
+      if (got.length) rows.push({ calls: got, originator: item.originator, zbo, tail: "", have: true });
     }
+  }
+  for (const job of net.qsos ?? []) {
+    if (!job.fromAck || !job.withAck) continue;
+    rows.push({
+      calls: [job.with],
+      originator: job.from,
+      zbo: `${job.quantity || 1} ${job.name}`,
+      tail: `ZOK IP (QSY ${job.channel})`,
+      have: true,
+    });
+  }
+  return rows;
+}
+
+function reportSections(net: Net): { zug: string[]; zev: string[] } {
+  const rows = reportRows(net);
+  const involved = new Set<string>();
+  for (const row of rows) {
+    involved.add(row.originator);
+    for (const call of row.calls) involved.add(call);
   }
   const names = shortNames([...involved]);
   const nameOf = (call: string) => names.get(call) ?? shortCall(call);
   const zug: string[] = [];
   const zev: string[] = [];
-  for (const item of net.transfers) {
-    if (!item.originator) continue;
-    const fileBits = [item.hash, item.file && item.file !== "Unassigned" ? item.file : ""].filter(Boolean);
-    const zbo = [`ZBO`, `1`, item.listing ?? "", ...fileBits].filter(Boolean).join(" ");
-    const tail = `DE ${nameOf(item.originator)} ${zbo}`;
-    const via = fileViaWl2k(net, item);
-    if (via.length) zug.push(`\t${via.map(nameOf).join(" ")} ${tail}`);
-    const got = transferRoster(net, item)
-      .filter((row) => row.report?.status === "have" && !via.includes(row.call))
-      .map((row) => row.call);
-    if (got.length) zev.push(`\t${got.map(nameOf).join(" ")} ${tail}`);
+  for (const row of rows) {
+    const line = `${row.calls.map(nameOf).join(" ")} DE ${nameOf(row.originator)} ZBO ${row.zbo}${row.tail ? ` ${row.tail}` : ""}`;
+    if (row.have) zev.push(line);
+    else zug.push(line);
   }
-  return ["INT ZUG ZEV", ...zug, "", "ZEV", ...zev].join("\n");
+  return { zug, zev };
+}
+
+/** Winlink Express / Pat / MacWinlink body, in the WL2K-HF gateway form. */
+export function winlinkMessage(net: Net): string {
+  const from = (net.myCall || net.ncs).toUpperCase();
+  const to = [...onAir(net).map((s) => s.call), ...wl2kStations(net).map((s) => s.call)];
+  if (net.ncs && !to.includes(net.ncs)) to.push(net.ncs);
+  const seen = new Set<string>();
+  const addrs = to.filter((call) => {
+    if (!call || call === from || seen.has(call)) return false;
+    seen.add(call);
+    return true;
+  });
+  const { zug, zev } = reportSections(net);
+  return [
+    `To: ${addrs.join("; ")}`,
+    `Subject: //WL2K R/ WL2K-HF GATEWAY ${localDtg(net.started)}`,
+    "",
+    `ZKS ${zksLine(net)} K`,
+    "",
+    "INT ZUG ZEV",
+    "",
+    ...zug,
+    "",
+    "ZEV",
+    "",
+    ...zev,
+    "",
+    "NNNN",
+  ].join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
 export function sessionReport(net: Net): string {
@@ -1575,6 +1682,127 @@ export function sessionK2s(net: Net): string {
     `:band:${net.band} ${net.channel}`,
     `:report:${report}`,
   ].join("\n");
+}
+
+const ROLE_TITLE: Record<Role, string> = {
+  ncs: "Net Control",
+  wl2k: "WL2K Gateway Operator",
+  ip: "IP Station",
+  operator: "Operator",
+};
+
+function esc(value: string): string {
+  return value.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">");
+}
+
+function localStamp(iso: string): string {
+  const d = new Date(iso);
+  const when = Number.isNaN(d.getTime()) ? new Date() : d;
+  const m = String(when.getMonth() + 1).padStart(2, "0");
+  const day = String(when.getDate()).padStart(2, "0");
+  const hh = String(when.getHours()).padStart(2, "0");
+  const mm = String(when.getMinutes()).padStart(2, "0");
+  return `${when.getFullYear()}-${m}-${day} ${hh}:${mm}`;
+}
+
+function formPage(title: string, body: string): string {
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>${esc(title)}</title>
+<style>
+  body { font-family: Arial, sans-serif; color: #111; margin: 1.2rem; }
+  h1 { font-size: 1.15rem; margin: 0 0 0.2rem; }
+  p.sub { margin: 0 0 0.8rem; font-size: 0.85rem; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 0.8rem; }
+  th, td { border: 1px solid #222; padding: 0.3rem 0.4rem; vertical-align: top; font-size: 0.85rem; }
+  th { text-align: left; background: #eee; width: 28%; }
+  td.n, th.n { width: 5.5rem; }
+  @media print { body { margin: 0.4rem; } }
+</style></head><body>
+${body}
+</body></html>`;
+}
+
+function commRows(net: Net): { time: string; from: string; to: string; subject: string }[] {
+  return net.log.map((entry) => {
+    const subject = entry.message.replace(/^Prepared:\s*/, "");
+    const upper = subject.toUpperCase();
+    let from = CALL.test(entry.source) ? entry.source : (net.myCall || net.ncs || "OPIN");
+    let to = "OPIN";
+    const parts = upper.split(" DE ");
+    if (parts.length >= 2) {
+      const called = parts[0].split(" ").map((t) => t.split("/")[0]).filter((t) => CALL.test(t));
+      const speaker = parts[1].split(" ")[0]?.split("/")[0] ?? "";
+      if (CALL.test(speaker)) from = speaker;
+      if (called.length) to = called.join(" ");
+    }
+    return { time: entry.time, from, to, subject };
+  });
+}
+
+/** ICS 214 Activity Log for this desk. */
+export function ics214(net: Net): string {
+  const me = net.myCall || net.ncs || "";
+  const position = ROLE_TITLE[net.role] ?? net.role;
+  const start = localStamp(net.started);
+  const end = localStamp(new Date().toISOString());
+  const resources = [
+    ...onAir(net).map((s) => [s.call, s.method === "IP" ? "IP" : "RF", "OPIN"]),
+    ...wl2kStations(net).map((s) => [s.call, "WL2K", "OPIN"]),
+  ];
+  const activity = net.log.map((entry) => `<tr><td class="n">${esc(entry.time)}Z</td><td>${esc(entry.message)}</td></tr>`).join("");
+  const resourceRows = resources.length
+    ? resources.map(([call, pos]) => `<tr><td>${esc(call)}</td><td>${esc(pos)}</td><td>OPIN</td></tr>`).join("")
+    : `<tr><td>&nbsp;</td><td></td><td></td></tr>`;
+  return formPage("ICS 214", `
+<h1>ICS 214 — Activity Log</h1>
+<p class="sub">OPIN. Times in the log are UTC. Fill the signature on the printed copy.</p>
+<table>
+  <tr><th>1. Incident Name</th><td>OPIN</td></tr>
+  <tr><th>2. Operational Period</th><td>From ${esc(start)} to ${esc(end)} local</td></tr>
+  <tr><th>3. Name</th><td>${esc(me)}</td></tr>
+  <tr><th>4. ICS Position</th><td>${esc(position)}</td></tr>
+  <tr><th>5. Home Agency</th><td>OPIN</td></tr>
+</table>
+<p class="sub">6. Resources Assigned</p>
+<table>
+  <tr><th>Name</th><th>ICS Position</th><th>Home Agency</th></tr>
+  ${resourceRows}
+</table>
+<p class="sub">7. Activity Log</p>
+<table>
+  <tr><th class="n">Date/Time</th><th>Notable Activities</th></tr>
+  ${activity || `<tr><td class="n"></td><td></td></tr>`}
+</table>
+<table>
+  <tr><th>8. Prepared by</th><td>${esc(me)}<br>${esc(position)}<br>${esc(end)} local<br>Signature: ____________________</td></tr>
+</table>`);
+}
+
+/** ICS 309 Communications Log for this desk. */
+export function ics309(net: Net): string {
+  const me = net.myCall || net.ncs || "";
+  const position = ROLE_TITLE[net.role] ?? net.role;
+  const start = localStamp(net.started);
+  const end = localStamp(new Date().toISOString());
+  const rows = commRows(net).map((row) =>
+    `<tr><td class="n">${esc(row.time)}Z</td><td>${esc(row.from)}</td><td>${esc(row.to)}</td><td>${esc(row.subject)}</td></tr>`,
+  ).join("");
+  return formPage("ICS 309", `
+<h1>ICS 309 — Communications Log</h1>
+<p class="sub">OPIN. Times are UTC. Fill the signature on the printed copy.</p>
+<table>
+  <tr><th>1. Incident Name</th><td>OPIN</td></tr>
+  <tr><th>2. Operational Period</th><td>From ${esc(start)} to ${esc(end)} local</td></tr>
+  <tr><th>3. Radio Operator</th><td>${esc(me)} — ${esc(position)}</td></tr>
+  <tr><th>4. Station I.D.</th><td>${esc(me)} ${esc(net.channel)} ${esc(net.band)}</td></tr>
+</table>
+<table>
+  <tr><th class="n">Time</th><th>From</th><th>To</th><th>Subject</th></tr>
+  ${rows || `<tr><td class="n"></td><td></td><td></td><td></td></tr>`}
+</table>
+<table>
+  <tr><th>5. Prepared by</th><td>${esc(me)}<br>${esc(position)}<br>${esc(end)} local<br>Signature: ____________________</td></tr>
+</table>`);
 }
 
 export function myPlace(net: Net): number {
